@@ -1,0 +1,14 @@
+# C:\Users\DELL\Desktop\VigilSiddhi\backend\windows\config.yaml
+
+windows_hosts:
+  - name: Laptop
+    ip: 127.0.0.1
+    username: vigilsiddhi
+    password: vigilsiddhi
+    services:
+      - SysMain
+      - Power
+    processes:
+      - chrome
+      - firefox
+      - dummy

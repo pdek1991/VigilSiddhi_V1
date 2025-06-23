@@ -1,0 +1,3 @@
+com\example\snmppolling\service\SnmpKmxService.class
+com\example\snmppolling\config\AppConfig.class
+com\example\snmppolling\SnmpPollingApplication.class

@@ -1,0 +1,1572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VigilSiddhi Dashboard</title>
+    <link rel="icon" type="image/x-xicon" href="/media/logo.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for better visual impact and responsiveness */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark background */
+            color: #e2e8f0; /* Light text */
+            overflow-x: hidden; /* Prevent horizontal scrolling */
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh; /* Ensure body takes full viewport height */
+            margin: 0; /* Reset default body margin */
+            padding: 0; /* Reset default body padding */
+        }
+
+        /* Header styling for logo and title */
+        .dashboard-header {
+            display: flex;
+            align-items: center; /* Align items vertically in the center */
+            justify-content: space-between; /* Pushes logo to left, title to center */
+            margin-bottom: 1rem;
+            padding: 0.75rem 1.5rem; /* Add horizontal padding for full width utilization */
+            width: 100%; /* Ensure header uses full width */
+            box-sizing: border-box; /* Include padding in width */
+            position: relative; /* For dropdown menu positioning */
+        }
+
+        .dashboard-logo-container {
+            flex-shrink: 0; /* Prevent logo from shrinking */
+            display: flex;
+            align-items: center; /* Align items vertically */
+            padding-right: 1.5rem; /* Increased space between logo and title */
+        }
+
+        .dashboard-logo {
+            max-width: 80px; /* Reduced logo size */
+            height: auto;
+            border-radius: 0.5rem; /* Rounded corners for the logo */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+
+        .dashboard-title {
+            flex-grow: 1; /* Allows title to take available space and center */
+            text-align: center; /* Keep title centered */
+            font-size: 1.5rem; /* Smaller title */
+            font-weight: 700;
+            color: #63b3ed; /* A nice blue for the title */
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            margin: 0; /* Remove default margins */
+        }
+
+        /* Hamburger menu styling */
+        .menu-icon {
+            cursor: pointer;
+            font-size: 1.8rem; /* Larger icon */
+            color: #a0aec0;
+            padding: 0.5rem;
+            border-radius: 0.375rem; /* rounded-md */
+            transition: background-color 0.2s ease-in-out;
+        }
+
+        .menu-icon:hover {
+            background-color: #4a5568; /* hover:bg-gray-700 */
+        }
+
+        .dropdown-menu {
+            position: absolute;
+            top: 100%; /* Position below the header */
+            left: 0;
+            background-color: #2d3748; /* bg-gray-800 */
+            border-radius: 0.5rem; /* rounded-lg */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            min-width: 150px;
+            padding: 0.5rem 0;
+        }
+
+        .dropdown-menu a {
+            display: block;
+            padding: 0.75rem 1rem;
+            color: #e2e8f0; /* text-gray-200 */
+            text-decoration: none;
+            transition: background-color 0.2s ease-in-out;
+        }
+
+        .dropdown-menu a:hover {
+            background-color: #4a5568; /* hover:bg-gray-700 */
+        }
+
+        /* Main dashboard grid for channels */
+        .dashboard-grid {
+            flex-grow: 1; /* Allow the grid to take available space */
+            display: grid;
+            /* Adjusted for dynamic channels per row, with increased minimum width to prevent text truncation */
+            grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+            gap: 0.75rem; /* Gap between blocks */
+            padding: 0.75rem; /* Padding around the grid */
+            width: 100%; /* Utilize full width */
+            box-sizing: border-box; /* Include padding in width */
+            margin: 0; /* Remove auto margins */
+        }
+
+        /* Channel block styling for square shape */
+        .channel-block {
+            background-color: #2d3748; /* Slightly lighter dark background */
+            border-radius: 0.6rem;
+            box-shadow: 0 3px 5px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s ease-in-out;
+            position: relative; /* Needed for absolute positioning of inner content */
+            padding-bottom: 100%; /* This creates the square aspect ratio */
+            height: 0; /* Important for padding-bottom hack to work */
+            overflow: hidden; /* Hide anything outside the square */
+        }
+
+        .channel-block:hover {
+            transform: translateY(-3px); /* Slight lift on hover */
+        }
+
+        /* Inner container for channel block content to fill the square */
+        .channel-block-inner {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex; /* Make it flex to arrange name and grid */
+            flex-direction: column;
+            padding: 0.6rem; /* Original padding for content inside the square */
+            box-sizing: border-box; /* Include padding in inner dimensions */
+            overflow: hidden; /* NO SCROLLING HERE */
+        }
+
+        .channel-name {
+            flex-shrink: 0; /* Prevent channel name from shrinking */
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.6rem;
+            text-align: center;
+            color: #a0aec0;
+        }
+
+        /* Channel-specific device layout grid inside the inner block */
+        .channel-device-grid {
+            flex-grow: 1; /* Allow device grid to take remaining space */
+            display: grid;
+            /* Adjusted column widths: last column slightly wider to prevent truncation of "OUT" blocks */
+            grid-template-columns: 1fr 1.5fr 1fr 1.1fr;
+            grid-template-rows: repeat(3, auto);
+            gap: 0.4rem;
+            grid-template-areas:
+                "vs-m cp-vs42m da-m da-m-out"
+                "vs-p .        da-p .       "
+                "vs-b cp-pgm42m da-b da-b-out";
+        }
+
+        /* Individual device block styling */
+        .device-status {
+            min-height: 2rem; /* Adjusted min-height for small square */
+            display: flex; /* Changed to flex */
+            flex-direction: column; /* Stack content vertically */
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.4rem; /* Slightly smaller rounded corners */
+            font-size: 0.65rem; /* Adjusted font size for small square */
+            font-weight: 500; /* font-medium */
+            color: #ffffff; /* White text for status blocks */
+            text-align: center;
+            padding: 0.2rem; /* Reduced padding */
+            word-break: break-word; /* Break long words */
+            line-height: 1.2; /* Adjust line height for better fit */
+            transition: background-color 0.3s ease-in-out; /* Smooth color transitions */
+        }
+
+        /* Assign grid areas to individual device blocks */
+        .device-status[data-area="vs-m"] { grid-area: vs-m; }
+        .device-status[data-area="vs-p"] { grid-area: vs-p; }
+        .device-status[data-area="vs-b"] { grid-area: vs-b; }
+        .device-status[data-area="da-m"] { grid-area: da-m; }
+        .device-status[data-area="da-p"] { grid-area: da-p; }
+        .device-status[data-area="da-b"] { grid-area: da-b; }
+        .device-status[data-area="cp-vs42m"] { grid-area: cp-vs42m; }
+        .device-status[data-area="cp-pgm42m"] { grid-area: cp-pgm42m; }
+        .device-status[data-area="da-m-out"] { grid-area: da-m-out; }
+        .device-status[data-area="da-b-out"] { grid-area: da-b-out; }
+
+        /* Styles for the larger Crosspoint blocks (with 2-row labels) */
+        .device-status.large-cp-block {
+            min-height: 3rem; /* Adjusted min-height for horizontal rectangle */
+            font-size: 0.7rem; /* Adjusted font size for horizontal rectangle */
+        }
+
+        /* Global status blocks at the bottom of the page */
+        .global-group-status-container {
+            padding: 1rem 1.5rem; /* Add horizontal padding for full width utilization */
+            background-color: #2d3748;
+            border-radius: 0.6rem;
+            box-shadow: 0 3px 5px rgba(0, 0, 0, 0.1);
+            flex-shrink: 0;
+            margin: 0.75rem auto; /* Center with auto margins and add vertical space */
+            width: 100%; /* Take full width */
+            box-sizing: border-box; /* Include padding in width */
+        }
+
+        .global-blocks-grid {
+            display: flex; /* Use flex for horizontal arrangement */
+            flex-wrap: wrap; /* Allow wrapping on smaller screens */
+            gap: 0.6rem; /* Slightly reduced gap */
+            justify-content: center;
+        }
+
+        .global-status-block {
+            min-width: 7rem; /* Reduced width */
+            min-height: 3.5rem; /* Reduced height */
+            flex: 1 1 auto; /* Allow blocks to grow/shrink */
+            display: flex;
+            flex-direction: column; /* Stack name and IP vertically */
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.4rem; /* Slightly smaller rounded corners */
+            font-size: 0.8rem; /* Reduced font size */
+            font-weight: 600;
+            color: #ffffff;
+            text-align: center;
+            padding: 0.4rem; /* Reduced padding */
+            word-break: break-word;
+            line-height: 1.2;
+            transition: background-color 0.3s ease-in-out;
+        }
+
+        .global-status-block .block-name {
+            margin-bottom: 0.2rem;
+        }
+
+        .global-status-block .block-ip {
+            font-size: 0.7rem;
+            font-weight: 400;
+            opacity: 0.8;
+        }
+
+
+        /* Status colors */
+        .status-ok { background-color: #10b981; } /* Green-500 */
+        .status-alarm { background-color: #ef4444; } /* Red-500 */
+        .status-warning { background-color: #f59e0b; } /* Yellow-500 */
+        .status-unknown { background-color: #6b7280; } /* Gray-500 */
+
+        /* Docker Alarm Console specific styles */
+        .alarm-console-container {
+            position: relative; /* For positioning the button */
+            padding: 1rem 1.5rem;
+            background-color: #2d3748;
+            border-radius: 0.6rem;
+            margin: 0.75rem auto; /* Center with auto margins and add vertical space */
+            width: 100%; /* Take full width */
+            box-sizing: border-box; /* Include padding in width */
+            box-shadow: 0 3px 5px rgba(0, 0, 0, 0.1);
+            flex-shrink: 0;
+            overflow-x: auto; /* Allow horizontal scrolling for table on small screens */
+        }
+
+        .alarm-console-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .alarm-console-table th,
+        .alarm-console-table td {
+            padding: 0.75rem;
+            border: 1px solid #4a5568; /* Darker border */
+            text-align: left;
+            font-size: 0.85rem;
+        }
+
+        .alarm-console-table th {
+            background-color: #4a5568; /* Header background */
+            font-weight: 700;
+            color: #e2e8f0;
+            white-space: nowrap; /* Prevent headers from wrapping */
+        }
+
+        .alarm-console-table td {
+            background-color: #2d3748; /* Cell background */
+            color: #cbd5e0;
+        }
+
+        /* Open Alarm Console Button */
+        .open-alarm-console-button {
+            position: absolute;
+            top: 1rem;
+            right: 1.5rem;
+            background-color: #4299e1; /* Blue */
+            color: white;
+            padding: 0.4rem 0.8rem;
+            border-radius: 0.3rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out;
+            z-index: 10; /* Ensure it's above other content if necessary */
+        }
+        .open-alarm-console-button:hover {
+            background-color: #3182ce; /* Darker blue */
+        }
+
+
+        /* Trending Dashboard iFrame styles */
+        .iframe-view-container { /* Renamed from trending-dashboard-container for generality */
+            flex-grow: 1;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;         /* Align content to the top */
+            padding: 0.25rem; /* Less padding at bottom */
+            box-sizing: border-box;
+            height: calc(100vh - 0px);      /* Occupy most of the viewport height */
+        }
+        .iframe-view-container iframe {
+            width: 100%;
+            height: 100%; /* Fixed height as requested */
+            border: none;
+            border-radius: 0.6rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 1024px) {
+            .dashboard-grid {
+                grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); /* Adjusted min-width */
+            }
+            .channel-device-grid {
+                grid-template-columns: 1fr 1.2fr 1fr 1fr; /* Reverted to 1fr as overall width is less */
+            }
+            .device-status {
+                min-height: 1.8rem; /* Adjusted min-height */
+            }
+            .large-cp-block {
+                min-height: 2.5rem; /* Adjusted min-height */
+            }
+            .dashboard-title {
+                font-size: 1.3rem; /* Smaller on smaller screens */
+            }
+            .global-status-block {
+                min-width: 6.5rem;
+                min-height: 3rem;
+                font-size: 0.75rem;
+            }
+            .iframe-view-container iframe {
+                height: 100%; /* Adjust iframe height for smaller screens */
+            }
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); /* Adjusted min-width */
+            }
+            .channel-block {
+                padding: 0.5rem;
+            }
+            .channel-name {
+                font-size: 0.9rem;
+                margin-bottom: 0.5rem;
+            }
+            .channel-device-grid {
+                grid-template-columns: 1fr 1.2fr 1fr 1fr; /* Reverted to 1fr as overall width is less */
+            }
+            .device-status {
+                min-height: 1.6rem; /* Adjusted min-height */
+                font-size: 0.65rem;
+            }
+            .large-cp-block {
+                min-height: 2.2rem; /* Adjusted min-height */
+            }
+            .dashboard-title {
+                font-size: 1.2rem; /* Smaller on smaller screens */
+            }
+            .global-status-block {
+                min-width: 5.5rem;
+                min-height: 2.8rem;
+                font-size: 0.7rem;
+            }
+            .alarm-console-table th,
+            .alarm-console-table td {
+                padding: 0.5rem;
+                font-size: 0.75rem;
+            }
+            .iframe-view-container iframe {
+                height: 100%; /* Further adjust iframe height for smaller screens */
+            }
+            .open-alarm-console-button {
+                top: 0.5rem;
+                right: 0.5rem;
+                padding: 0.3rem 0.6rem;
+                font-size: 0.7rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr; /* Single column on very small screens */
+            }
+            .channel-device-grid {
+                /* When single column, stack internal elements vertically */
+                grid-template-columns: 1fr;
+                grid-template-rows: auto;
+                grid-template-areas: none; /* Remove grid areas for stacking */
+            }
+            /* Ensure all device status blocks take full width when stacked */
+            .device-status[data-area] {
+                grid-area: auto !important; /* Override grid-area for stacking */
+                width: 100%;
+            }
+            .device-status {
+                min-height: 1.5rem; /* Adjusted min-height */
+                font-size: 0.6rem;
+            }
+            .large-cp-block {
+                min-height: 2rem; /* Adjusted min-height */
+            }
+            .global-group-status-container {
+                max-width: 98%;
+            }
+            .global-blocks-grid {
+                justify-content: flex-start; /* Align blocks to start on smallest screens */
+            }
+            .global-status-block {
+                min-width: calc(50% - 0.3rem); /* Two blocks per row on smallest screens, considering gap */
+                min-height: 2.2rem;
+                font-size: 0.65rem;
+            }
+            .alarm-console-table th,
+            .alarm-console-table td {
+                font-size: 0.65rem;
+            }
+            .open-alarm-console-button {
+                position: static; /* Stack naturally */
+                width: calc(100% - 1rem); /* Take full width minus padding */
+                margin-top: 0.5rem;
+            }
+        }
+
+        /* New Config Tab Styles */
+        .config-container {
+            padding: 1rem 1.5rem;
+            background-color: #2d3748;
+            border-radius: 0.6rem;
+            margin: 0.75rem 0;
+            width: 100%;
+            box-sizing: border-box;
+            box-shadow: 0 3px 5px rgba(0, 0, 0, 0.1);
+            flex-grow: 1; /* Allow to take available space */
+            display: flex;
+            flex-direction: column;
+        }
+
+        .config-tabs {
+            display: flex;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid #4a5568;
+        }
+
+        .config-tab-button {
+            padding: 0.75rem 1.5rem;
+            cursor: pointer;
+            border-top-left-radius: 0.5rem;
+            border-top-right-radius: 0.5rem;
+            background-color: #2d3748;
+            color: #a0aec0;
+            font-weight: 600;
+            transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
+            margin-right: 0.25rem;
+        }
+
+        .config-tab-button.active {
+            background-color: #4a5568;
+            color: #e2e8f0;
+            border-bottom: 2px solid #63b3ed;
+        }
+
+        .config-tab-button:hover:not(.active) {
+            background-color: #3b4453;
+        }
+
+        .config-tab-content {
+            flex-grow: 1;
+            padding: 1rem;
+            background-color: #1a202c; /* Inner dark background */
+            border-radius: 0.5rem;
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .config-tab-content.active {
+            display: flex; /* Show when active */
+        }
+
+        .config-form label {
+            display: block;
+            margin-bottom: 0.25rem;
+            font-weight: 500;
+            color: #a0aec0;
+            font-size: 0.9rem;
+        }
+
+        .config-form input[type="text"],
+        .config-form input[type="password"],
+        .config-form select {
+            width: 100%;
+            padding: 0.6rem;
+            border-radius: 0.375rem;
+            border: 1px solid #4a5568;
+            background-color: #2d3748;
+            color: #e2e8f0;
+            font-size: 0.9rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .config-form input:focus,
+        .config-form select:focus {
+            outline: none;
+            border-color: #63b3ed;
+            box-shadow: 0 0 0 2px rgba(99, 179, 237, 0.5);
+        }
+
+        .config-form button {
+            background-color: #63b3ed; /* Blue for submit */
+            color: #ffffff;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out;
+        }
+
+        .config-form button:hover {
+            background-color: #4299e1; /* Darker blue on hover */
+        }
+
+        .config-list-container {
+            margin-top: 1.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid #4a5568;
+        }
+
+        .config-list-container h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #63b3ed;
+            margin-bottom: 0.75rem;
+        }
+
+        .config-list-item {
+            background-color: #2d3748;
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            font-size: 0.85rem;
+            color: #cbd5e0;
+            word-break: break-all;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .config-list-item button {
+            background-color: #ef4444;
+            color: white;
+            padding: 0.3rem 0.6rem;
+            border-radius: 0.3rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out;
+        }
+        .config-list-item button:hover {
+            background-color: #dc2626;
+        }
+
+        .validation-error {
+            color: #ef4444;
+            font-size: 0.8rem;
+            margin-top: -0.5rem;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+        .message-box {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #2d3748;
+            border-radius: 0.6rem;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            padding: 2rem;
+            z-index: 1001;
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            color: #e2e8f0;
+            font-size: 1.1rem;
+            max-width: 80%;
+            text-align: center;
+        }
+        .message-box button {
+            background-color: #63b3ed;
+            color: white;
+            padding: 0.6rem 1.2rem;
+            border-radius: 0.4rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .message-box button:hover {
+            background-color: #4299e1;
+        }
+        .message-box.show {
+            display: flex;
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <div class="py-4">
+        <header class="dashboard-header">
+            <div class="flex items-center">
+                <div class="menu-icon mr-4" onclick="toggleMenu()">
+                    <i class="fas fa-bars"></i>
+                </div>
+                <div id="dropdown-menu" class="dropdown-menu hidden">
+                    <a href="#" onclick="showView('dashboard')">Dashboard</a>
+                    <a href="#" onclick="showView('trending')">Trending</a>
+                    <a href="#" onclick="showView('ird-overview')">IRD Overview</a> <!-- NEW: IRD Overview link -->
+                    <a href="#" onclick="showView('config'); loadDeviceConfigs(); loadGlobalConfigs();">Config</a>
+                </div>
+            </div>
+            <div class="dashboard-logo-container">
+                <img src="/media/logo.png" alt="VigilSiddhi Logo" class="dashboard-logo" onerror="this.onerror=null;this.src='https://placehold.co/80x80/63b3ed/ffffff?text=VigilSiddhi+Logo';">
+            </div>
+            <h1 class="dashboard-title">VigilSiddhi Dashboard</h1>
+            <div></div> </header>
+
+        <div id="dashboard-view">
+            <div id="dashboard" class="dashboard-grid">
+            </div>
+
+            <div id="global-group-status" class="global-group-status-container">
+                <h2 class="text-xl font-semibold text-center mb-4 text-blue-400">Overall System Status</h2>
+                <div class="global-blocks-grid">
+                    </div>
+            </div>
+
+            <div id="alarm-console" class="alarm-console-container">
+                <h2 class="text-xl font-semibold text-center mb-4 text-red-400">Alarm Console
+                    <button class="open-alarm-console-button" onclick="openFullAlarmConsole()">Open Full Console</button>
+                </h2>
+                <div class="overflow-x-auto">
+                    <table class="alarm-console-table">
+                        <thead>
+                            <tr>
+                                <th>Device Name</th>
+                                <th>IP Address</th>
+                                <th>Message</th>
+                                <th>Severity</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="alarm-console-table-body">
+                            <tr><td colspan="5" class="text-center py-4">No active alarms found.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div id="trending-view" class="iframe-view-container hidden"> <!-- Renamed class -->
+            <iframe
+             src="https://img-cdn.publive.online/fit-in/1280x960/filters:format(webp)/afaqs/media/post_attachments/3ffb6c3ced5b4ef914c73a09af551d4666f6367.png"
+             width="100%"
+             height="800"
+             frameborder="0"
+             allowfullscreen>
+            </iframe>
+        </div>
+
+        <!-- NEW: IRD Overview View -->
+        <div id="ird-overview-view" class="iframe-view-container hidden">
+            <iframe
+             src="/ird_overview"
+             width="100%"
+             height="800"
+             frameborder="0"
+             allowfullscreen>
+            </iframe>
+        </div>
+
+        <div id="config-view" class="config-container hidden">
+            <h2 class="text-xl font-semibold text-center mb-4 text-purple-400">Configuration Management</h2>
+
+            <div class="config-tabs">
+                <button class="config-tab-button active" onclick="switchConfigTab('device-config-tab')">Device Config</button>
+                <button class="config-tab-button" onclick="switchConfigTab('global-config-tab')">Global Config</button>
+            </div>
+
+            <div id="device-config-tab" class="config-tab-content active">
+                <form id="device-config-form" class="config-form" onsubmit="saveDeviceConfig(event)">
+                    <label for="deviceName">Device Name:</label>
+                    <input type="text" id="deviceName" name="deviceName" placeholder="e.g., VS M Channel 01" required>
+                    <span id="deviceNameError" class="validation-error hidden">Device Name is required.</span>
+
+                    <label for="deviceIP">Device IP:</label>
+                    <input type="text" id="deviceIP" name="deviceIP" placeholder="e.g., 192.168.1.101" pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}$" title="Enter a valid IP address" required>
+                    <span id="deviceIPError" class="validation-error hidden">A valid IP address is required.</span>
+
+                    <label for="deviceUser">Username:</label>
+                    <input type="text" id="deviceUser" name="deviceUser" required>
+                    <span id="deviceUserError" class="validation-error hidden">Username is required.</span>
+
+                    <label for="devicePass">Password:</label>
+                    <input type="password" id="devicePass" name="devicePass" required>
+                    <span id="devicePassError" class="validation-error hidden">Password is required.</span>
+
+                    <label for="deviceGroup">Device Group:</label>
+                    <select id="deviceGroup" name="deviceGroup" required>
+                        <option value="">Select a group</option>
+                        </select>
+                    <span id="deviceGroupError" class="validation-error hidden">Device Group is required.</span>
+
+                    <button type="submit">Add Device Configuration</button>
+                </form>
+
+                <div class="config-list-container">
+                    <h3>Configured Devices:</h3>
+                    <div id="device-config-list">
+                        <p class="text-gray-400">No device configurations saved for this session.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="global-config-tab" class="config-tab-content">
+                <form id="global-config-form" class="config-form" onsubmit="saveGlobalConfig(event)">
+                    <label for="globalDeviceName">Device Name:</label>
+                    <input type="text" id="globalDeviceName" name="globalDeviceName" placeholder="e.g., Collective iLO M" required>
+                    <span id="globalDeviceNameError" class="validation-error hidden">Device Name is required.</span>
+
+                    <label for="globalDeviceIP">Device IP:</label>
+                    <input type="text" id="globalDeviceIP" name="globalDeviceIP" placeholder="e.g., 192.168.2.1" pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}$" title="Enter a valid IP address" required>
+                    <span id="globalDeviceIPError" class="validation-error hidden">A valid IP address is required.</span>
+
+                    <label for="globalDeviceUser">Username:</label>
+                    <input type="text" id="globalDeviceUser" name="globalDeviceUser" required>
+                    <span id="globalDeviceUserError" class="validation-error hidden">Username is required.</span>
+
+                    <label for="globalDevicePass">Password:</label>
+                    <input type="password" id="globalDevicePass" name="globalDevicePass" required>
+                    <span id="globalDevicePassError" class="validation-error hidden">Password is required.</span>
+
+                    <label for="globalDeviceGroup">Device Group:</label>
+                    <select id="globalDeviceGroup" name="globalDeviceGroup" required>
+                        <option value="">Select a group</option>
+                        </select>
+                    <span id="globalDeviceGroupError" class="validation-error hidden">Device Group is required.</span>
+
+                    <label for="globalGroupName">Global Group Name (for Dashboard Block):</label>
+                    <input type="text" id="globalGroupName" name="globalGroupName" placeholder="e.g., My Custom iLO Group" required>
+                    <span id="globalGroupNameError" class="validation-error hidden">Global Group Name is required.</span>
+
+                    <button type="submit">Add Global Configuration</button>
+                </form>
+
+                <div class="config-list-container">
+                    <h3>Configured Global Groups:</h3>
+                    <div id="global-config-list">
+                        <p class="text-gray-400">No global configurations saved for this session.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="messageBox" class="message-box">
+        <h3 id="messageBoxTitle" class="text-xl font-bold mb-2"></h3>
+        <p id="messageBoxContent" class="text-md mb-4"></p>
+        <button onclick="document.getElementById('messageBox').classList.remove('show')">OK</button>
+    </div>
+
+    <script>
+        // Define the number of channels
+        const NUM_CHANNELS = 50;
+
+        // Define all individual devices for a channel, along with their grid area for layout
+        const channelDevicesBlueprint = [
+            { id: 'VS_M', name: 'VS M', area: 'vs-m', usesIlo: true },
+            { id: 'VS_P', name: 'VS P', area: 'vs-p', usesIlo: true },
+            { id: 'VS_B', name: 'VS B', area: 'vs-b', usesIlo: true },
+            { id: 'CP_VS42M', name: '186-11 VS42M', area: 'cp-vs42m', isLarge: true, labelLines: ['VS42M', '186-11'], usesIlo: false },
+            { id: 'CP_PGM42M', name: '402-11 PGM42M', area: 'cp-pgm42m', isLarge: true, labelLines: ['PGM42M', '402-11'], usesIlo: false },
+            { id: 'DA_M', name: 'DA M', area: 'da-m', usesIlo: false },
+            { id: 'DA_P', name: 'DA P', area: 'da-p', usesIlo: false },
+            { id: 'DA_B', name: 'DA B', area: 'da-b', usesIlo: false },
+            { id: 'DA_M_OUT', name: 'DA M OUT', area: 'da-m-out', usesIlo: false },
+            { id: 'DA_B_OUT', name: 'DA B OUT', area: 'da-b-out', usesIlo: false },
+        ];
+
+        // Define the global group status blocks (Initially populated, can be expanded by config)
+        let globalGroupStatusBlocks = [
+            {
+                id: 'GROUP_ILO_M',
+                name: 'iLO M',
+                collectiveType: 'VS_M',
+                additional_ips: [{ ip: '172.19.180.63', username: 'Administrator', password: 'Sony@2024!' }],
+            },
+            {
+                id: 'GROUP_ILO_P',
+                name: 'iLO P',
+                collectiveType: 'VS_P',
+                additional_ips: [{ ip: '172.19.180.65', username: 'Administrator', password: 'Sony@2024!' }],
+            },
+            {
+                id: 'GROUP_ILO_B',
+                name: 'iLO B',
+                collectiveType: 'VS_B',
+                additional_ips: [{ ip: '172.19.180.51', username: 'Administrator', password: 'Sony@2024!' }],
+            },
+            {
+                id: 'GROUP_ENCODER_M',
+                name: 'Encoder M',
+                collectiveType: 'Encoder M',
+                additional_ips: [{ ip: '172.19.180.65', username: 'Administrator', password: 'Sony@2024!' }],
+            },
+            {
+                id: 'GROUP_ENC_B',
+                name: 'Encoder B',
+                collectiveType: 'Encoder B',
+                additional_ips: [{ ip: '10.0.0.100', username: 'N/A', password: 'N/A' }],
+            },
+            {
+                id: 'GROUP_CISCO_D9800',
+                name: 'Cisco D9800',
+                collectiveType: 'D9800-PIRD', // Use the group type for IRD
+                additional_ips: [{ ip: '10.0.0.101', username: 'N/A', password: 'N/A' }],
+            },
+            {
+                id: 'GROUP_CISCO_SWITCH',
+                name: 'Cisco Switch',
+                collectiveType: 'Cisco Switch',
+                additional_ips: [{ ip: '10.0.0.102', username: 'N/A', password: 'N/A' }],
+            },
+            {
+                id: 'GROUP_NEXUS_SWITCH',
+                name: 'Nexus Switch',
+                collectiveType: 'Nexus Switch',
+                additional_ips: [{ ip: '10.0.0.103', username: 'N/A', password: 'N/A' }],
+            },
+            {
+                id: 'GROUP_KMX',
+                name: 'KMX',
+                collectiveType: 'KMX',
+                // No additional_ips here, as Java service will push its status directly to Flask
+            },
+            { id: 'GROUP_WINDOWS', name: 'Windows Processes', collectiveType: 'WINDOWS-PROCESS' },
+        ];
+
+        const API_BASE_URL = '/api/v1';
+
+        let allCurrentAlarms = [];
+        let uniqueAlarmsMap = new Map();
+        let pendingAlarmsForConsole = [];
+        let alarmConsoleUpdateTimer = null;
+        const IMMEDIATE_UPDATE_DELAY = 100;
+
+        // Dummy configs for in-memory storage (to be replaced by persistent storage)
+        let deviceConfigs = [];
+        let globalConfigs = [];
+        let configCounter = 0;
+
+        // Function to toggle the dropdown menu visibility
+        function toggleMenu() {
+            const dropdown = document.getElementById('dropdown-menu');
+            dropdown.classList.toggle('hidden');
+        }
+
+        // Function to switch between views
+        function showView(viewId) {
+            document.getElementById('dashboard-view').classList.add('hidden');
+            document.getElementById('trending-view').classList.add('hidden');
+            document.getElementById('ird-overview-view').classList.add('hidden'); // NEW: Hide IRD Overview view
+            document.getElementById('config-view').classList.add('hidden');
+
+            document.getElementById(`${viewId}-view`).classList.remove('hidden');
+
+            if (viewId === 'config') {
+                switchConfigTab('device-config-tab');
+                loadDeviceConfigs();
+                loadGlobalConfigs();
+            }
+
+            toggleMenu();
+        }
+
+        // Function to switch between config tabs
+        function switchConfigTab(tabId) {
+            document.querySelectorAll('.config-tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            document.querySelectorAll('.config-tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+
+            document.querySelector(`.config-tab-button[onclick*="${tabId}"]`).classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+        }
+
+        // Function to update a single status block (device or global group)
+        function updateStatusBlock(elementId, status) {
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.classList.remove('status-ok', 'status-alarm', 'status-warning', 'status-unknown');
+                switch (status.toLowerCase()) {
+                    case 'ok':
+                    case 'running':
+                        element.classList.add('status-ok');
+                        break;
+                    case 'alarm':
+                    case 'not found':
+                    case 'stopped':
+                    case 'error_ps':
+                    case 'error_ssh':
+                    case 'auth_failed':
+                    case 'ssh_error':
+                    case 'connection_failed':
+                    case 'error': // Add 'error' as an alarm status for blocks
+                        element.classList.add('status-alarm');
+                        break;
+                    case 'warning':
+                        element.classList.add('status-warning');
+                        break;
+                    default:
+                        element.classList.add('status-unknown');
+                        break;
+                }
+            }
+        }
+
+        // Debounced function to trigger alarm console re-render with deduplication
+        function triggerImmediateAlarmConsoleUpdate() {
+            clearTimeout(alarmConsoleUpdateTimer);
+            alarmConsoleUpdateTimer = setTimeout(async () => { // Made async to await fetchAllAlarms
+                await fetchAllAlarms(); // Re-fetch all alarms from backend
+                
+                // After fetching, process for unique alarms
+                uniqueAlarmsMap.clear(); // Clear to re-populate
+                allCurrentAlarms.forEach(newAlarm => {
+                    const key = `${newAlarm.server_ip}-${newAlarm.message}-${newAlarm.device_name || ''}-${newAlarm.type || ''}`; // More robust key
+                    const existingAlarm = uniqueAlarmsMap.get(key);
+
+                    if (!existingAlarm || new Date(newAlarm.timestamp) > new Date(existingAlarm.timestamp)) {
+                        uniqueAlarmsMap.set(key, newAlarm);
+                    }
+                });
+
+                allCurrentAlarms = Array.from(uniqueAlarmsMap.values());
+                allCurrentAlarms.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                renderAlarmConsole(allCurrentAlarms);
+                pendingAlarmsForConsole = []; // Clear buffer
+            }, IMMEDIATE_UPDATE_DELAY);
+        }
+
+        // Function to fetch status for an individual iLO device and update its block
+        async function fetchIndividualIloStatus(channelNum, deviceId) {
+            const elementId = `channel-${channelNum}-${deviceId}`;
+            const element = document.getElementById(elementId);
+            if (!element) return { status: 'unknown', alarms: [] };
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/get_ilo_status/${channelNum}/${deviceId}`);
+                if (!response.ok) {
+                    console.error(`iLO Status Backend HTTP error for Channel ${channelNum} ${deviceId}: ${response.status}`);
+                    updateStatusBlock(elementId, 'unknown');
+                    return { status: 'unknown', alarms: [], error: `Backend responded with status ${response.status}` };
+                }
+                const data = await response.json();
+                const status = data.status;
+                const alarms = data.alarms || [];
+                updateStatusBlock(elementId, status);
+                return { status: status, alarms: alarms };
+            } catch (error) {
+                console.error(`Network or parsing error for Channel ${channelNum} ${deviceId}:`, error);
+                updateStatusBlock(elementId, 'unknown');
+                return { status: 'unknown', alarms: [], error: `Network error: ${error.message}` };
+            }
+        }
+
+        // Function to fetch collective iLO status for global blocks
+        async function fetchCollectiveIloStatus(groupBlock) {
+            const collectiveType = groupBlock.collectiveType;
+            const blockDivId = `global-${groupBlock.id}`;
+            const element = document.getElementById(blockDivId);
+
+            if (!collectiveType || !element) {
+                console.warn(`Global block for collective type '${collectiveType}' not found or element missing.`);
+                return { status: 'unknown', alarms: [] };
+            }
+
+            try {
+                // Special handling for D9800-PIRD if its collective status is derived differently
+                if (collectiveType === 'D9800-PIRD') {
+                    // For the main dashboard block, we want a summary. 
+                    // The IRD Overview page will have details.
+                    // This fetches general IRD status (from D9800IRD class)
+                    const response = await fetch(`${API_BASE_URL}/get_ird_status`); 
+                    if (!response.ok) {
+                        console.error(`IRD Collective Backend HTTP error for collective ${collectiveType}: ${response.status}`);
+                        updateStatusBlock(blockDivId, 'unknown');
+                        return { status: 'unknown', alarms: [], error: `Backend responded with status ${response.status}` };
+                    }
+                    const data = await response.json();
+                    // Assuming data.irds is a list of IRD statuses, we need to find the highest severity
+                    let overallIrdStatus = "ok";
+                    let irdAlarms = [];
+                    if (data.irds && Array.isArray(data.irds)) {
+                        const statuses = data.irds.map(ird => ird.overall_status);
+                        if (statuses.includes("Alarm")) overallIrdStatus = "alarm";
+                        else if (statuses.includes("Error")) overallIrdStatus = "alarm"; // Treat Error as alarm for dashboard
+                        else if (statuses.includes("Warning")) overallIrdStatus = "warning";
+                        
+                        data.irds.forEach(ird => {
+                            if (ird.errors && ird.errors.length > 0) {
+                                ird.errors.forEach(errMsg => {
+                                    irdAlarms.push({
+                                        server_ip: ird.ip_address,
+                                        message: errMsg,
+                                        severity: ird.overall_status === "Alarm" ? "CRITICAL" : "WARNING",
+                                        timestamp: new Date().toISOString(), // Use current time for dynamic alarms
+                                        device_name: `D9800 IRD ${ird.ip_address}`,
+                                        type: "ird_summary"
+                                    });
+                                });
+                            }
+                            if (ird.fault_status && ird.fault_status.length > 0) {
+                                ird.fault_status.forEach(fault => {
+                                    irdAlarms.push({
+                                        server_ip: ird.ip_address,
+                                        message: `Fault: ${fault.name} - ${fault.details}`,
+                                        severity: fault.severity.toUpperCase(),
+                                        timestamp: fault.setsince || new Date().toISOString(),
+                                        device_name: `D9800 IRD ${ird.ip_address}`,
+                                        type: "ird_fault"
+                                    });
+                                });
+                            }
+                        });
+                    }
+                    updateStatusBlock(blockDivId, overallIrdStatus);
+                    return { status: overallIrdStatus, alarms: irdAlarms };
+
+                } else {
+                    // Existing logic for other collective types
+                    const response = await fetch(`${API_BASE_URL}/get_collective_ilo_status/${collectiveType}`);
+                    if (!response.ok) {
+                        console.error(`iLO Collective Backend HTTP error for collective ${collectiveType}: ${response.status}`);
+                        updateStatusBlock(blockDivId, 'unknown');
+                        return { status: 'unknown', alarms: [], error: `Backend responded with status ${response.status}` };
+                    }
+                    const data = await response.json();
+                    const status = data.status;
+                    const alarms = data.alarms || [];
+                    updateStatusBlock(blockDivId, status);
+                    return { status: status, alarms: alarms };
+                }
+
+            } catch (error) {
+                console.error(`Network or parsing error for collective ${collectiveType}:`, error);
+                updateStatusBlock(blockDivId, 'unknown');
+                return { status: 'unknown', alarms: [], error: `Network error: ${error.message}` };
+            }
+        }
+
+        // Function to fetch Windows monitoring status
+        async function fetchWindowsStatus() {
+            const groupBlock = globalGroupStatusBlocks.find(b => b.id === 'GROUP_WINDOWS');
+            const blockDivId = `global-${groupBlock?.id}`;
+            const element = document.getElementById(blockDivId);
+            if (!groupBlock || !element) {
+                console.warn("Windows Processes global block not found or element missing.");
+                return { overall_status: 'unknown', alarms: [] };
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/get_windows_status`);
+                if (!response.ok) {
+                    console.error(`Windows Monitor Backend HTTP error: ${response.status}`);
+                    updateStatusBlock(blockDivId, 'unknown');
+                    return { overall_status: 'unknown', alarms: [], error: `Backend responded with status ${response.status}` };
+                }
+                const data = await response.json();
+                const overallStatus = data.overall_status;
+                updateStatusBlock(blockDivId, overallStatus);
+                return { overall_status: overallStatus, alarms: data.alarms || [] };
+            } catch (error) {
+                console.error(`Network or parsing error for Windows Monitor:`, error);
+                updateStatusBlock(blockDivId, 'unknown');
+                return { overall_status: 'unknown', alarms: [], error: `Network error: ${error.message}` };
+            }
+        }
+
+        // NEW: Function to fetch KMX block status (color) from Flask backend
+        async function fetchKmxBlockStatus() {
+            const groupBlock = globalGroupStatusBlocks.find(b => b.id === 'GROUP_KMX');
+            const blockDivId = `global-${groupBlock?.id}`;
+            const element = document.getElementById(blockDivId);
+            if (!groupBlock || !element) {
+                console.warn("KMX global block not found or element missing.");
+                return { overall_status: 'unknown' };
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/get_kmx_block_status`); // New endpoint
+                if (!response.ok) {
+                    console.error(`KMX Block Status Backend HTTP error: ${response.status}`);
+                    updateStatusBlock(blockDivId, 'unknown');
+                    return { overall_status: 'unknown', error: `Backend responded with status ${response.status}` };
+                }
+                const data = await response.json();
+                const overallStatus = data.overall_status;
+                updateStatusBlock(blockDivId, overallStatus);
+                return { overall_status: overallStatus };
+            } catch (error) {
+                console.error(`Network or parsing error for KMX Block Status:`, error);
+                updateStatusBlock(blockDivId, 'unknown');
+                return { overall_status: 'unknown', error: `Network error: ${error.message}` };
+            }
+        }
+
+        // NEW: Function to fetch ALL active alarms from Flask backend
+        async function fetchAllAlarms() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/get_all_active_alarms`);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`Failed to fetch all alarms: ${response.status} - ${errorText}`);
+                    return;
+                }
+                const data = await response.json();
+                allCurrentAlarms = data.alarms || []; // Update the global alarms array
+                console.log(`Fetched ${allCurrentAlarms.length} alarms from backend.`);
+            } catch (error) {
+                console.error("Error fetching all alarms from backend:", error);
+            }
+        }
+
+
+        // Function to update all channel and global statuses (full refresh)
+        async function updateAllStatuses() {
+            console.log('Starting full update cycle: Fetching all statuses...');
+
+            // Fetch KMX block status first, as it's simpler
+            console.log('Fetching KMX block status...');
+            await fetchKmxBlockStatus(); // Update KMX block color
+
+            // 1. Fetch individual iLO channel statuses for all relevant devices (concurrently within this step)
+            console.log('Fetching all individual iLO channel statuses (VS_M, VS_P, VS_B)...');
+            const channelUpdatePromises = [];
+            for (let i = 1; i <= NUM_CHANNELS; i++) {
+                channelDevicesBlueprint.forEach(device => {
+                    if (device.usesIlo) {
+                        channelUpdatePromises.push(fetchIndividualIloStatus(i, device.id));
+                    }
+                });
+            }
+            await Promise.all(channelUpdatePromises);
+            console.log('Finished fetching individual iLO channel statuses.');
+
+            // 2. Fetch Windows monitoring status
+            console.log('Fetching Windows monitoring status...');
+            await fetchWindowsStatus();
+            console.log('Finished fetching Windows monitoring status.');
+
+            // 3. Fetch collective iLO statuses for global blocks (VS_M, VS_P, VS_B) and D9800-PIRD
+            console.log('Fetching collective statuses...');
+            const globalBlockPromises = globalGroupStatusBlocks
+                .filter(block => block.collectiveType && (block.collectiveType.startsWith('VS_') || block.collectiveType === 'D9800-PIRD'))
+                .map(block => fetchCollectiveIloStatus(block));
+            await Promise.all(globalBlockPromises);
+            console.log('Finished fetching collective iLO and IRD D9800 statuses.');
+
+            // 4. Fetch status for other global blocks (Encoder M, B, Cisco, Nexus)
+            console.log('Fetching other global block statuses...');
+            const otherGlobalBlockPromises = globalGroupStatusBlocks
+                .filter(block =>
+                    block.id !== 'GROUP_WINDOWS' &&
+                    block.id !== 'GROUP_KMX' &&
+                    block.collectiveType &&
+                    !block.collectiveType.startsWith('VS_') &&
+                    block.collectiveType !== 'D9800-PIRD'
+                )
+                .map(block => fetchCollectiveIloStatus(block));
+            await Promise.all(otherGlobalBlockPromises);
+            console.log('Finished fetching other global block statuses (excluding KMX and D9800-PIRD).');
+
+
+            // After all polling fetches, trigger a final, consolidated update to the alarm console
+            // The alarms are now fetched from Elasticsearch via `get_all_active_alarms`
+            triggerImmediateAlarmConsoleUpdate();
+            console.log('Full update cycle complete.');
+        }
+
+        // Function to render the alarm console table
+        function renderAlarmConsole(alarms) {
+            const tableBody = document.getElementById('alarm-console-table-body');
+            tableBody.innerHTML = '';
+
+            if (alarms.length === 0) {
+                const noAlarmsRow = document.createElement('tr');
+                noAlarmsRow.innerHTML = `<td colspan="5" class="text-center py-4">No active alarms found.</td>`;
+                tableBody.appendChild(noAlarmsRow);
+            } else {
+                const alarmsToDisplay = alarms.slice(0, 30);
+                alarmsToDisplay.forEach(alarm => {
+                    const row = document.createElement('tr');
+                    let timeFormatted = alarm.timestamp;
+                    try {
+                        const date = new Date(alarm.timestamp);
+                        timeFormatted = date.toLocaleString();
+                    } catch (e) {
+                        console.warn("Could not parse alarm timestamp:", alarm.timestamp, e);
+                    }
+
+                    // Adjust display logic based on alarm 'type'
+                    const deviceDisplayName = (alarm.type === 'snmp_kmx' || alarm.type === 'snmp_kmx_trap')
+                                                ? alarm.device_name || 'KMX Device'
+                                                : (alarm.channel_name && alarm.device_name && alarm.device_name !== 'N/A')
+                                                    ? `${alarm.channel_name} - ${alarm.device_name}`
+                                                    : alarm.channel_name || alarm.device_name || alarm.server_ip || 'N/A';
+
+                    const displayMessage = alarm.message || 'No Message';
+
+                    row.innerHTML = `
+                        <td>${deviceDisplayName}</td>
+                        <td>${alarm.server_ip || 'N/A'}</td>
+                        <td>${displayMessage}</td>
+                        <td>${alarm.severity || 'Unknown'}</td>
+                        <td>${timeFormatted}</td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+            }
+        }
+
+        // Function to open a new window with the full alarm console
+        function openFullAlarmConsole() {
+            sessionStorage.setItem('fullAlarmList', JSON.stringify(allCurrentAlarms));
+            window.open('/alarm_console_fullscreen', '_blank'); 
+            console.log("Attempting to open full alarm console.");
+        }
+        window.openFullAlarmConsole = openFullAlarmConsole;
+
+        // Function to render the dashboard (channels and global blocks)
+        async function renderDashboard() {
+            const dashboardContainer = document.getElementById('dashboard');
+            dashboardContainer.innerHTML = '';
+
+            for (let i = 1; i <= NUM_CHANNELS; i++) {
+                const channelId = `channel-${i}`;
+                const channelName = `Channel ${String(i).padStart(2, '0')}`;
+
+                const channelBlock = document.createElement('div');
+                channelBlock.id = channelId;
+                channelBlock.className = 'channel-block';
+
+                let channelDevicesHtml = '';
+                const deviceMap = new Map(channelDevicesBlueprint.map(d => [d.area, d]));
+
+                const gridAreasOrder = [
+                    'vs-m', 'cp-vs42m', 'da-m', 'da-m-out',
+                    'vs-p', '.', 'da-p', '.',
+                    'vs-b', 'cp-pgm42m', 'da-b', 'da-b-out'
+                ];
+
+                gridAreasOrder.forEach(area => {
+                    if (area === '.') {
+                        channelDevicesHtml += `<div class="empty-cell"></div>`;
+                    } else {
+                        const device = deviceMap.get(area);
+                        if (device) {
+                            let displayText = device.name;
+                            if (device.labelLines) {
+                                displayText = device.labelLines.join('<br>');
+                            }
+                            channelDevicesHtml += `
+                                <div id="${channelId}-${device.id}"
+                                     class="device-status status-ok ${device.isLarge ? 'large-cp-block' : ''}"
+                                     data-area="${device.area}">
+                                    ${displayText}
+                                </div>
+                            `;
+                        }
+                    }
+                });
+
+                channelBlock.innerHTML = `
+                    <div class="channel-block-inner">
+                        <h2 class="channel-name">${channelName}</h2>
+                        <div class="channel-device-grid">
+                            ${channelDevicesHtml}
+                        </div>
+                    </div>
+                `;
+                dashboardContainer.appendChild(channelBlock);
+            }
+
+            const globalGroupStatusContainer = document.querySelector('#global-group-status .global-blocks-grid');
+            globalGroupStatusContainer.innerHTML = '';
+
+            globalGroupStatusBlocks.forEach(groupBlock => {
+                const blockDiv = document.createElement('div');
+                blockDiv.id = `global-${groupBlock.id}`;
+                blockDiv.className = 'global-status-block status-ok';
+
+                let ipDisplay = '';
+                if (groupBlock.additional_ips && groupBlock.additional_ips.length > 0) {
+                    ipDisplay = groupBlock.additional_ips[0].ip;
+                    if (groupBlock.additional_ips.length > 1) {
+                        ipDisplay += ' (+ more)';
+                    }
+                } else if (groupBlock.id === 'GROUP_WINDOWS') {
+                    ipDisplay = 'Local Network';
+                } else if (groupBlock.id === 'GROUP_KMX') {
+                    ipDisplay = '172.19.185.230'; // Fixed IP for KMX, displayed
+                } else if (groupBlock.collectiveType === 'D9800-PIRD') { // Display IP range for IRD
+                     ipDisplay = '172.19.206.1-45';
+                }
+
+
+                blockDiv.innerHTML = `
+                    <div class="block-name">${groupBlock.name}</div>
+                    <div class="block-ip">${ipDisplay || 'N/A'}</div>
+                `;
+                globalGroupStatusContainer.appendChild(blockDiv);
+            });
+
+            updateAllStatuses();
+        }
+
+        // --- Configuration Management Functions ---
+
+        const DEVICE_GROUPS = ["HP-iLO", "D9800-PIRD", "CISCO Switch", "NEXUS-Switch", "Catalyst-SW", "WINDOWS-PROCESS", "HTTP_status"];
+
+        function populateDeviceGroupDropdowns() {
+            const deviceGroupSelect = document.getElementById('deviceGroup');
+            const globalDeviceGroupSelect = document.getElementById('globalDeviceGroup');
+
+            while (deviceGroupSelect.children.length > 1) {
+                deviceGroupSelect.removeChild(deviceGroupSelect.lastChild);
+            }
+            while (globalDeviceGroupSelect.children.length > 1) {
+                globalDeviceGroupSelect.removeChild(globalDeviceGroupSelect.lastChild);
+            }
+
+            DEVICE_GROUPS.forEach(group => {
+                const option1 = document.createElement('option');
+                option1.value = group;
+                option1.textContent = group;
+                deviceGroupSelect.appendChild(option1);
+
+                const option2 = document.createElement('option');
+                option2.value = group;
+                option2.textContent = group;
+                globalDeviceGroupSelect.appendChild(option2);
+            });
+        }
+
+        function validateForm(formId) {
+            const form = document.getElementById(formId);
+            let isValid = true;
+            form.querySelectorAll('input[required], select[required]').forEach(input => {
+                const errorSpan = document.getElementById(`${input.id}Error`);
+                if (!input.value.trim()) {
+                    isValid = false;
+                    input.classList.add('border-red-500');
+                    if (errorSpan) errorSpan.classList.remove('hidden');
+                } else if (input.type === 'text' && input.pattern && !new RegExp(input.pattern).test(input.value)) {
+                    isValid = false;
+                    input.classList.add('border-red-500');
+                    if (errorSpan) {
+                         errorSpan.textContent = input.title || "Invalid format.";
+                         errorSpan.classList.remove('hidden');
+                    }
+                } else {
+                    input.classList.remove('border-red-500');
+                    if (errorSpan) errorSpan.classList.add('hidden');
+                }
+            });
+            return isValid;
+        }
+
+        function saveDeviceConfig(event) {
+            event.preventDefault();
+            if (!validateForm('device-config-form')) {
+                showMessageBox("Validation Error", "Please fill in all mandatory fields correctly.");
+                return;
+            }
+
+            const deviceName = document.getElementById('deviceName').value;
+            const deviceIP = document.getElementById('deviceIP').value;
+            const deviceUser = document.getElementById('deviceUser').value;
+            const devicePass = document.getElementById('devicePass').value;
+            const deviceGroup = document.getElementById('deviceGroup').value;
+
+            const newConfig = {
+                id: `dev-${++configCounter}`,
+                deviceName,
+                deviceIP,
+                deviceUser,
+                devicePass,
+                deviceGroup,
+                createdAt: new Date().toISOString()
+            };
+            deviceConfigs.push(newConfig);
+            console.log("Device config added (in-memory): ", newConfig);
+            showMessageBox("Success", "Device configuration added! (Not saved persistently)");
+            document.getElementById('device-config-form').reset();
+            loadDeviceConfigs();
+        }
+        window.saveDeviceConfig = saveDeviceConfig;
+
+        function loadDeviceConfigs() {
+            const listDiv = document.getElementById('device-config-list');
+            listDiv.innerHTML = '';
+
+            if (deviceConfigs.length === 0) {
+                listDiv.innerHTML = '<p class="text-gray-400">No device configurations saved for this session.</p>';
+                return;
+            }
+
+            deviceConfigs.forEach((data) => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'config-list-item';
+                itemDiv.innerHTML = `
+                    <div>
+                        <strong>${data.deviceName}</strong> (${data.deviceGroup})<br>
+                        IP: ${data.deviceIP}<br>
+                        User: ${data.deviceUser}
+                    </div>
+                    <button onclick="deleteDeviceConfig('${data.id}')">Delete</button>
+                `;
+                listDiv.appendChild(itemDiv);
+            });
+        }
+        window.loadDeviceConfigs = loadDeviceConfigs;
+
+        function deleteDeviceConfig(id) {
+            if (!confirm('Are you sure you want to delete this device configuration from this session?')) return;
+
+            deviceConfigs = deviceConfigs.filter(config => config.id !== id);
+            showMessageBox("Success", "Device configuration deleted from this session.");
+            loadDeviceConfigs();
+        }
+        window.deleteDeviceConfig = deleteDeviceConfig;
+
+
+        function saveGlobalConfig(event) {
+            event.preventDefault();
+            if (!validateForm('global-config-form')) {
+                showMessageBox("Validation Error", "Please fill in all mandatory fields correctly.");
+                return;
+            }
+
+            const globalDeviceName = document.getElementById('globalDeviceName').value;
+            const globalDeviceIP = document.getElementById('globalDeviceIP').value;
+            const globalDeviceUser = document.getElementById('globalDeviceUser').value;
+            const globalDevicePass = document.getElementById('globalDevicePass').value;
+            const globalDeviceGroup = document.getElementById('globalDeviceGroup').value;
+            const globalGroupName = document.getElementById('globalGroupName').value;
+
+            const newConfig = {
+                id: `global-${++configCounter}`,
+                deviceName: globalDeviceName,
+                deviceIP: globalDeviceIP,
+                deviceUser: globalDeviceUser,
+                devicePass: globalDevicePass,
+                deviceGroup: globalDeviceGroup,
+                globalGroupName: globalGroupName,
+                createdAt: new Date().toISOString()
+            };
+            globalConfigs.push(newConfig);
+            console.log("Global config added (in-memory): ", newConfig);
+            showMessageBox("Success", "Global configuration added! (Not saved persistently)");
+            document.getElementById('global-config-form').reset();
+            loadGlobalConfigs();
+
+            const newGlobalBlockId = `GROUP_${globalGroupName.replace(/\s+/g, '_').toUpperCase()}`;
+            const exists = globalGroupStatusBlocks.some(block => block.id === newGlobalBlockId);
+            if (!exists) {
+                globalGroupStatusBlocks.push({
+                    id: newGlobalBlockId,
+                    name: globalGroupName,
+                    collectiveType: globalDeviceGroup,
+                    additional_ips: [{ ip: globalDeviceIP, username: globalDeviceUser, password: globalDevicePass }]
+                });
+                renderDashboard();
+            }
+        }
+        window.saveGlobalConfig = saveGlobalConfig;
+
+        function loadGlobalConfigs() {
+            const listDiv = document.getElementById('global-config-list');
+            listDiv.innerHTML = '';
+
+            if (globalConfigs.length === 0) {
+                listDiv.innerHTML = '<p class="text-gray-400">No global configurations saved for this session.</p>';
+                return;
+            }
+
+            globalConfigs.forEach((data) => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'config-list-item';
+                itemDiv.innerHTML = `
+                    <div>
+                        <strong>${data.globalGroupName}</strong> (${data.deviceGroup})<br>
+                        IP: ${data.deviceIP}<br>
+                        User: ${data.deviceUser}
+                    </div>
+                    <button onclick="deleteGlobalConfig('${data.id}')">Delete</button>
+                `;
+                listDiv.appendChild(itemDiv);
+            });
+        }
+        window.loadGlobalConfigs = loadGlobalConfigs;
+
+        function deleteGlobalConfig(id) {
+            if (!confirm('Are you sure you want to delete this global configuration from this session?')) return;
+
+            const deletedConfig = globalConfigs.find(config => config.id === id);
+            globalConfigs = globalConfigs.filter(config => config.id !== id);
+            showMessageBox("Success", "Global configuration deleted from this session.");
+            loadGlobalConfigs();
+
+            if (deletedConfig) {
+                const removedDivId = `global-GROUP_${deletedConfig.globalGroupName.replace(/\s+/g, '_').toUpperCase()}`;
+                const elementToRemove = document.getElementById(removedDivId);
+                if (elementToRemove) {
+                    elementToRemove.remove();
+                }
+                globalGroupStatusBlocks = globalGroupStatusBlocks.filter(block => block.id !== `GROUP_${deletedConfig.globalGroupName.replace(/\s+/g, '_').toUpperCase()}`);
+                renderDashboard();
+            }
+        }
+        window.deleteGlobalConfig = deleteGlobalConfig;
+
+        function showMessageBox(title, message) {
+            const msgBox = document.getElementById('messageBox');
+            document.getElementById('messageBoxTitle').textContent = title;
+            document.getElementById('messageBoxContent').textContent = message;
+            msgBox.classList.add('show');
+        }
+        window.showMessageBox = showMessageBox;
+
+        // Initialize the dashboard when the window loads
+        window.onload = function() {
+            renderDashboard();
+            populateDeviceGroupDropdowns();
+            setInterval(updateAllStatuses, 60000); // Polls every 5 seconds for full refresh
+            showView('dashboard');
+        };
+    </script>
+</body>
+</html>
