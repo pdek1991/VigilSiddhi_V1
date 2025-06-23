@@ -282,13 +282,14 @@ class MySQLManager:
         query = "DELETE FROM kmx_configs WHERE id = %s"
         return self._execute_query(query, (config_id,), commit=True)
 
-    # --- CRUD operations for pgm_routing (modified based on DESCRIBE output) ---
+    # --- CRUD operations for pgm_routing ---
     def add_pgm_routing_config(self, pgm_dest, router_source, frontend_block_id, domain, channel_name=None):
         query = "INSERT INTO pgm_routing (pgm_dest, router_source, frontend_block_id, domain, channel_name) VALUES (%s, %s, %s, %s, %s)"
         params = (pgm_dest, router_source, frontend_block_id, domain, channel_name)
         return self._execute_query(query, params, commit=True)
 
     def get_pgm_routing_configs(self):
+        # Includes 'id' as it's typically a primary key and useful for updates/deletes
         query = "SELECT id, pgm_dest, router_source, frontend_block_id, domain, channel_name FROM pgm_routing"
         return self._execute_query(query, fetch_all=True)
     
@@ -296,10 +297,9 @@ class MySQLManager:
         query = "SELECT id, pgm_dest, router_source, frontend_block_id, domain, channel_name FROM pgm_routing WHERE id = %s"
         return self._execute_query(query, (config_id,), fetch_one=True)
     
-    def get_pgm_routing_config_by_frontend_block_id(self, frontend_block_id):
-        query = "SELECT id, pgm_dest, router_source, frontend_block_id, domain, channel_name FROM pgm_routing WHERE frontend_block_id = %s"
-        return self._execute_query(query, (frontend_block_id,), fetch_one=True)
-
+    def get_pgm_routing_config_by_pgm_dest(self, pgm_dest): # Added for direct pgm_dest lookup
+        query = "SELECT id, pgm_dest, router_source, frontend_block_id, domain, channel_name FROM pgm_routing WHERE pgm_dest = %s"
+        return self._execute_query(query, (pgm_dest,), fetch_one=True)
 
     def update_pgm_routing_config(self, config_id, pgm_dest, router_source, frontend_block_id, domain, channel_name=None):
         query = "UPDATE pgm_routing SET pgm_dest = %s, router_source = %s, frontend_block_id = %s, domain = %s, channel_name = %s WHERE id = %s"
