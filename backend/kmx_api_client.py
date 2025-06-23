@@ -32,6 +32,8 @@ class KMXAPIClient:
     def __init__(self):
         # Initializing SnmpDispatcher. This instance will be reused across operations.
         self.snmp_dispatcher = SnmpDispatcher()
+        logging.info("KMXAPIClient initialized with SnmpDispatcher.")
+
 
     def _resolve_oid_name(self, oid):
         """
@@ -119,6 +121,7 @@ class KMXAPIClient:
         """
         final_results = []
         child_ids = set()
+        disabled_component_ids = set() # New set to store IDs of disabled components
 
         # Ensure base_oid is clean (remove leading dot if present) and convert to tuple of integers
         cleaned_base_oid_str = base_oid_str.lstrip('.')
@@ -130,6 +133,74 @@ class KMXAPIClient:
         
         logging.debug(f"DEBUG: filtered_snmp_data - Converted cleaned_base_oid_str to tuple: {base_oid_tuple}")
 
+        # --- New Logic: Identify Disabled Components from .21.3.1.2.1.6 branch ---
+        input_status_base_oid_str = "1.3.6.1.4.1.3872.21.3.1.2.1.6"
+        try:
+            input_status_base_oid_tuple = tuple(int(x) for x in input_status_base_oid_str.split('.'))
+        except ValueError:
+            logging.error(f"Invalid input_status_base_oid_str format: '{input_status_base_oid_str}'. Must be dot-separated integers.")
+            # Do not return, continue with what's possible
+            input_status_base_oid_tuple = () # Empty tuple to prevent further errors
+
+        if input_status_base_oid_tuple:
+            logging.info(f"Starting SNMP walk to identify disabled components for {ip} from base OID: {input_status_base_oid_str}")
+            current_input_status_oid_to_walk = ObjectIdentity(input_status_base_oid_tuple)
+
+            while True:
+                errorIndication, errorStatus, errorIndex, varBinds = await next_cmd(
+                    self.snmp_dispatcher,
+                    CommunityData(community, mpModel=1),
+                    await UdpTransportTarget.create((ip, 161)),
+                    ObjectType(current_input_status_oid_to_walk),
+                    lexicographicalMode=True,
+                    timeout=5,
+                    retries=2
+                )
+
+                if errorIndication:
+                    logging.error(f"SNMP Walk Error for {ip} on input status branch: {errorIndication}")
+                    break
+                if errorStatus:
+                    logging.warning(f"SNMP Walk Status Error for {ip} on input status branch: {errorStatus.prettyPrint()}")
+                    break
+
+                if not varBinds:
+                    logging.debug(f"DEBUG: No more varBinds returned for input status walk, ending.")
+                    break
+
+                oid, value = varBinds[0]
+                full_polled_oid_tuple = oid.getOid().asTuple()
+
+                # Check if OID is within the input status branch
+                if not full_polled_oid_tuple[:len(input_status_base_oid_tuple)] == input_status_base_oid_tuple:
+                    logging.debug(f"DEBUG: OID {oid.prettyPrint()} is outside input status branch, stopping walk.")
+                    break
+                
+                try:
+                    child_id_parts = full_polled_oid_tuple[len(input_status_base_oid_tuple):]
+                    if child_id_parts:
+                        current_child_id = str(child_id_parts[0]) # Get the first element as the child ID
+                        current_input_status_specific_oid_tuple = input_status_base_oid_tuple + (int(current_child_id),)
+                        original_input_status_oid_str = f"{input_status_base_oid_str}.{current_child_id}"
+
+                        status_result = await self._get_snmp_value(ip, community, current_input_status_specific_oid_tuple, original_input_status_oid_str)
+                        # The interpreted value will be "disabled" if the raw value was -1 due to GSM_STATUS_MAP
+                        if status_result.get("interpreted") == "disabled": # THIS IS THE CHECK YOU ARE ASKING ABOUT
+                            disabled_component_ids.add(current_child_id)
+                            logging.debug(f"DEBUG: Identified disabled component: Child ID '{current_child_id}' (OID: {original_input_status_oid_str})")
+                        else:
+                            logging.debug(f"DEBUG: Component {current_child_id} is not disabled (Status: {status_result.get('interpreted')})")
+                    else:
+                        logging.warning(f"Warning: Could not extract child ID from OID {oid.prettyPrint()} for input status.")
+                except Exception as e:
+                    logging.warning(f"Error processing input status OID {oid.prettyPrint()}: {e}", exc_info=True)
+                
+                current_input_status_oid_to_walk = oid
+            logging.info(f"Found {len(disabled_component_ids)} disabled components for {ip}.")
+        # --- End New Logic ---
+
+
+        # --- Existing Alarm Processing Logic ---
         severity_branch_oid_tuple = base_oid_tuple + (3,) # .3 for alarm status/severity
         
         logging.debug(f"DEBUG: filtered_snmp_data - Constructed severity_branch_oid for walk as tuple: {severity_branch_oid_tuple}")
@@ -196,6 +267,11 @@ class KMXAPIClient:
 
         # 2. Now, for each collected child ID, perform specific GETs and apply filtering
         for child_id_str in sorted(list(child_ids), key=int): # Keep child_id as string for display
+            # NEW FILTER: Skip if this component's ID was found to be disabled
+            if child_id_str in disabled_component_ids:
+                logging.info(f"Skipping alarm check for component ID '{child_id_str}' as it is disabled.")
+                continue
+
             child_id_int = int(child_id_str) # Convert to int for tuple concatenation
 
             # Construct OIDs as tuples for robust ObjectIdentity initialization
