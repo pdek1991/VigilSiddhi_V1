@@ -791,14 +791,33 @@
     <script>
         // Define the number of channels
         const NUM_CHANNELS = 50;
+        const WS_URL = "ws://127.0.0.1:8000"; // WebSocket Notifier URL
+        let ws; // WebSocket instance
+
+        // Severity order for color mapping (higher value means higher severity)
+        const SEVERITY_ORDER = {
+            'INFO': 0, 'OK': 0, 'NORMAL': 0,
+            'WARNING': 1, 'MINOR': 1,
+            'ALARM': 2, 'MAJOR': 2,
+            'ERROR': 3, 'CRITICAL': 3, 'FATAL': 3,
+            'UNKNOWN': -1 // Lowest priority
+        };
+
+        const SEVERITY_COLOR_CLASSES = {
+            'OK': 'status-ok', 'INFO': 'status-ok', 'NORMAL': 'status-ok',
+            'WARNING': 'status-warning', 'MINOR': 'status-warning',
+            'ALARM': 'status-alarm', 'MAJOR': 'status-alarm',
+            'ERROR': 'status-alarm', 'CRITICAL': 'status-alarm', 'FATAL': 'status-alarm',
+            'UNKNOWN': 'status-unknown'
+        };
 
         // Define all individual devices for a channel, along with their grid area for layout
         const channelDevicesBlueprint = [
             { id: 'VS_M', name: 'VS M', area: 'vs-m', usesIlo: true },
             { id: 'VS_P', name: 'VS P', area: 'vs-p', usesIlo: true },
             { id: 'VS_B', name: 'VS B', area: 'vs-b', usesIlo: true },
-            { id: 'CP_VS42M', name: '186-11 VS42M', area: 'cp-vs42m', isLarge: true, labelLines: ['VS42M', '186-11'], usesIlo: false },
-            { id: 'CP_PGM42M', name: '402-11 PGM42M', area: 'cp-pgm42m', isLarge: true, labelLines: ['PGM42M', '402-11'], usesIlo: false },
+            { id: 'CP_VS42M', name: '186-11 VS42M', area: 'cp-vs42m', isLarge: true, labelLines: ['VS42M', '186-11'], usesIlo: false, isPgm: true, originalName: '186-11 VS42M' },
+            { id: 'CP_PGM42M', name: '402-11 PGM42M', area: 'cp-pgm42m', isLarge: true, labelLines: ['PGM42M', '402-11'], usesIlo: false, isPgm: true, originalName: '402-11 PGM42M' },
             { id: 'DA_M', name: 'DA M', area: 'da-m', usesIlo: false },
             { id: 'DA_P', name: 'DA P', area: 'da-p', usesIlo: false },
             { id: 'DA_B', name: 'DA B', area: 'da-b', usesIlo: false },
@@ -808,70 +827,34 @@
 
         // Define the global group status blocks (Initially populated, can be expanded by config)
         let globalGroupStatusBlocks = [
-            {
-                id: 'GROUP_ILO_M',
-                name: 'iLO M',
-                collectiveType: 'VS_M',
-                additional_ips: [{ ip: '172.19.180.63', username: 'Administrator', password: 'Sony@2024!' }],
-            },
-            {
-                id: 'GROUP_ILO_P',
-                name: 'iLO P',
-                collectiveType: 'VS_P',
-                additional_ips: [{ ip: '172.19.180.65', username: 'Administrator', password: 'Sony@2024!' }],
-            },
-            {
-                id: 'GROUP_ILO_B',
-                name: 'iLO B',
-                collectiveType: 'VS_B',
-                additional_ips: [{ ip: '172.19.180.51', username: 'Administrator', password: 'Sony@2024!' }],
-            },
-            {
-                id: 'GROUP_ENCODER_M',
-                name: 'Encoder M',
-                collectiveType: 'Encoder M',
-                additional_ips: [{ ip: '172.19.180.65', username: 'Administrator', password: 'Sony@2024!' }],
-            },
-            {
-                id: 'GROUP_ENC_B',
-                name: 'Encoder B',
-                collectiveType: 'Encoder B',
-                additional_ips: [{ ip: '10.0.0.100', username: 'N/A', password: 'N/A' }],
-            },
-            {
-                id: 'GROUP_CISCO_D9800',
-                name: 'Cisco D9800',
-                collectiveType: 'D9800-PIRD', // Use the group type for IRD
-                additional_ips: [{ ip: '10.0.0.101', username: 'N/A', password: 'N/A' }],
-            },
-            {
-                id: 'GROUP_CISCO_SWITCH',
-                name: 'Cisco Switch',
-                collectiveType: 'Cisco Switch',
-                additional_ips: [{ ip: '10.0.0.102', username: 'N/A', password: 'N/A' }],
-            },
-            {
-                id: 'GROUP_NEXUS_SWITCH',
-                name: 'Nexus Switch',
-                collectiveType: 'Nexus Switch',
-                additional_ips: [{ ip: '10.0.0.103', username: 'N/A', password: 'N/A' }],
-            },
-            {
-                id: 'GROUP_KMX',
-                name: 'KMX',
-                collectiveType: 'KMX',
-                // No additional_ips here, as Java service will push its status directly to Flask
-            },
-            { id: 'GROUP_WINDOWS', name: 'Windows Processes', collectiveType: 'WINDOWS-PROCESS' },
+            { id: 'G.iloM', name: 'iLO M', collectiveType: 'VS_M', displayIp: '172.19.180.63' },
+            { id: 'G.iloP', name: 'iLO P', collectiveType: 'VS_P', displayIp: '172.19.180.65' },
+            { id: 'G.iloB', name: 'iLO B', collectiveType: 'VS_B', displayIp: '172.19.180.51' },
+            { id: 'G.COMPRESSION_M', name: 'Encoder M', collectiveType: 'Encoder M', displayIp: '172.19.180.65' },
+            { id: 'G.COMPRESSION_B', name: 'Encoder B', collectiveType: 'Encoder B', displayIp: '10.0.0.100' },
+            { id: 'G.IRD', name: 'Cisco D9800', collectiveType: 'D9800-PIRD', displayIp: '172.19.206.1-45' },
+            { id: 'G.KMX', name: 'KMX', collectiveType: 'KMX', displayIp: '172.19.185.230' },
+            { id: 'G.CISCOSW', name: 'Cisco Switch', collectiveType: 'Cisco Switch', displayIp: '10.0.0.102' },
+            { id: 'G.NEXUXSW', name: 'Nexus Switch', collectiveType: 'Nexus Switch', displayIp: '10.0.0.103' },
+            { id: 'G.WIN_PROC', name: 'Windows Processes', collectiveType: 'WINDOWS-PROCESS', displayIp: 'Local Network' },
         ];
 
         const API_BASE_URL = '/api/v1';
 
-        let allCurrentAlarms = [];
-        let uniqueAlarmsMap = new Map();
-        let pendingAlarmsForConsole = [];
+        // Global map to store latest status for each frontend block ID
+        // key: frontend_block_id (e.g., C.101, C.104, G.iloM)
+        // value: { status: "OK", severity: "INFO", message: "...", dest_name: "..." }
+        let currentBlockStatus = new Map();
+
+        // Global map to store active alarms for the console
+        // key: unique alarm identifier (e.g., device_ip-message-severity)
+        // value: latest alarm object
+        let activeAlarms = new Map();
         let alarmConsoleUpdateTimer = null;
-        const IMMEDIATE_UPDATE_DELAY = 100;
+        const IMMEDIATE_UPDATE_DELAY = 100; // milliseconds for debouncing
+
+        // Store channel names fetched from DB
+        let channelNamesMap = new Map(); // key: channel_id (e.g., 1, 2), value: channel_name (e.g., "Channel A")
 
         // Dummy configs for in-memory storage (to be replaced by persistent storage)
         let deviceConfigs = [];
@@ -888,7 +871,7 @@
         function showView(viewId) {
             document.getElementById('dashboard-view').classList.add('hidden');
             document.getElementById('trending-view').classList.add('hidden');
-            document.getElementById('ird-overview-view').classList.add('hidden'); // NEW: Hide IRD Overview view
+            document.getElementById('ird-overview-view').classList.add('hidden');
             document.getElementById('config-view').classList.add('hidden');
 
             document.getElementById(`${viewId}-view`).classList.remove('hidden');
@@ -915,310 +898,234 @@
             document.getElementById(tabId).classList.add('active');
         }
 
-        // Function to update a single status block (device or global group)
-        function updateStatusBlock(elementId, status) {
-            const element = document.getElementById(elementId);
-            if (element) {
-                element.classList.remove('status-ok', 'status-alarm', 'status-warning', 'status-unknown');
-                switch (status.toLowerCase()) {
-                    case 'ok':
-                    case 'running':
-                        element.classList.add('status-ok');
-                        break;
-                    case 'alarm':
-                    case 'not found':
-                    case 'stopped':
-                    case 'error_ps':
-                    case 'error_ssh':
-                    case 'auth_failed':
-                    case 'ssh_error':
-                    case 'connection_failed':
-                    case 'error': // Add 'error' as an alarm status for blocks
-                        element.classList.add('status-alarm');
-                        break;
-                    case 'warning':
-                        element.classList.add('status-warning');
-                        break;
-                    default:
-                        element.classList.add('status-unknown');
-                        break;
+        // --- WebSocket Logic ---
+        function connectWebSocket() {
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+                return; // Already connected or connecting
+            }
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                console.log("WebSocket connected!");
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                console.log("WebSocket message received:", message);
+                processWebSocketMessage(message);
+            };
+
+            ws.onclose = (event) => {
+                console.warn("WebSocket disconnected:", event.code, event.reason);
+                // Attempt to reconnect after a delay
+                setTimeout(connectWebSocket, 5000);
+            };
+
+            ws.onerror = (error) => {
+                console.error("WebSocket error:", error);
+                ws.close(); // Close to trigger onclose and retry
+            };
+        }
+
+        function processWebSocketMessage(message) {
+            const { frontend_block_id, group_name, status, severity, message: msgText, dest_name, polled_value, expected_value } = message;
+
+            let targetId = null;
+            let currentChannelId = null; // For PGM blocks
+            let currentDeviceId = null; // For PGM blocks
+
+            if (frontend_block_id) {
+                // Determine if it's a channel block or global block
+                if (frontend_block_id.startsWith('C.')) {
+                    // Channel block ID format: C.<channel_id><device_code>
+                    // Extract channel number and device ID from frontend_block_id
+                    const match = frontend_block_id.match(/^C\.(\d+)([A-Z_]+)$/);
+                    if (match) {
+                        const channelNum = parseInt(match[1]);
+                        const deviceCode = match[2]; // e.g., 101 for VSM, 104 for PGM block
+
+                        // Find the corresponding device blueprint entry
+                        let deviceBlueprint = null;
+                        if (deviceCode.length <= 3) { // This is a bit weak, assumes C.101, C.102 etc.
+                            // Map numeric code to original blueprint ID
+                            const deviceCodeMap = {
+                                '101': 'VS_M', '201': 'VS_M', /* ... up to C.5001 */
+                                '102': 'VS_P', '202': 'VS_P', /* ... */
+                                '103': 'VS_B', '203': 'VS_B', /* ... */
+                                '104': 'CP_VS42M', '204': 'CP_VS42M', /* ... */
+                                '105': 'CP_PGM42M', '205': 'CP_PGM42M', /* ... */
+                                '106': 'DA_M', '206': 'DA_M', /* ... */
+                                '107': 'DA_P', '207': 'DA_P', /* ... */
+                                '108': 'DA_B', '208': 'DA_B', /* ... */
+                                '109': 'DA_M_OUT', '209': 'DA_M_OUT', /* ... */
+                                '110': 'DA_B_OUT', '210': 'DA_B_OUT'  /* ... */
+                            };
+                             // Calculate effective channel base for device code (e.g., C.104 -> 04 for channel 1)
+                            const effectiveDeviceCode = (parseInt(frontend_block_id.substring(2)) % 1000).toString();
+                            deviceBlueprint = channelDevicesBlueprint.find(d => d.id === deviceCodeMap[effectiveDeviceCode]);
+
+                        } else { // Assume it's directly the ID from blueprint (e.g., VS_M)
+                            deviceBlueprint = channelDevicesBlueprint.find(d => d.id === deviceCode);
+                        }
+
+                        if (deviceBlueprint) {
+                            targetId = `channel-${channelNum}-${deviceBlueprint.id}`;
+                            currentChannelId = channelNum;
+                            currentDeviceId = deviceBlueprint.id;
+                        } else {
+                            console.warn(`Could not find device blueprint for frontend_block_id: ${frontend_block_id}`);
+                        }
+
+                    } else {
+                        console.warn(`Invalid channel frontend_block_id format: ${frontend_block_id}`);
+                    }
+                } else { // Global block
+                    targetId = `global-${frontend_block_id}`;
+                }
+            } else if (group_name) {
+                // If only group_name is present, map it to the corresponding global block ID
+                const globalBlock = globalGroupStatusBlocks.find(block => block.name === group_name);
+                if (globalBlock) {
+                    targetId = `global-${globalBlock.id}`;
+                } else {
+                    console.warn(`Could not find global block for group_name: ${group_name}`);
                 }
             }
+
+            if (targetId) {
+                const element = document.getElementById(targetId);
+                if (element) {
+                    updateStatusBlockFromWS(element, status, severity);
+
+                    // Special handling for PGM blocks
+                    if (currentDeviceId && channelDevicesBlueprint.find(d => d.id === currentDeviceId)?.isPgm) {
+                        updatePgmBlockContent(element, msgText, dest_name, polled_value, expected_value);
+                    }
+                } else {
+                    console.warn(`Target element with ID ${targetId} not found for WS update.`);
+                }
+            }
+
+            // Always add the message to the alarm console buffer
+            if (status && SEVERITY_ORDER[severity.toUpperCase()] > SEVERITY_ORDER['OK']) { // Only add non-OK alarms
+                const alarmEntry = {
+                    device_name: message.device_name || message.group_name || 'N/A',
+                    server_ip: message.device_ip || 'N/A',
+                    message: msgText || 'No message provided',
+                    severity: severity || 'UNKNOWN',
+                    timestamp: message.timestamp || new Date().toISOString(),
+                    frontend_block_id: frontend_block_id, // Add block ID for potential filtering
+                    type: message.agent_type || 'websocket'
+                };
+                // Use a more robust key for deduplication to prevent duplicate alarms for the same issue
+                const alarmKey = `${alarmEntry.server_ip}-${alarmEntry.message}-${alarmEntry.severity}-${alarmEntry.frontend_block_id}`;
+                
+                // Only add if it's a new alarm or an update to an existing one
+                if (!activeAlarms.has(alarmKey) || new Date(alarmEntry.timestamp) > new Date(activeAlarms.get(alarmKey).timestamp)) {
+                    activeAlarms.set(alarmKey, alarmEntry);
+                }
+                triggerImmediateAlarmConsoleUpdate(); // Debounced update
+            } else if (status && SEVERITY_ORDER[severity.toUpperCase()] <= SEVERITY_ORDER['OK']) {
+                // If status becomes OK, attempt to clear related alarms from console
+                clearAlarmsForBlock(frontend_block_id);
+            }
         }
+
+        function updateStatusBlockFromWS(element, status, severity) {
+            const desiredClass = SEVERITY_COLOR_CLASSES[severity.toUpperCase()] || 'status-unknown';
+            
+            // Get current classes
+            const currentClasses = Array.from(element.classList);
+            
+            // Remove any existing status classes
+            const classesToRemove = ['status-ok', 'status-alarm', 'status-warning', 'status-unknown'];
+            element.classList.remove(...classesToRemove);
+            
+            // Add the new status class
+            element.classList.add(desiredClass);
+        }
+
+        function updatePgmBlockContent(element, message, destName, polledValue, expectedValue) {
+            // Check if destName is provided, and use it for the second row, otherwise default to a part of the message
+            const firstRowText = message ? message.split(': ')[1] || message : `${polledValue} - ${expectedValue}`;
+            const secondRowText = destName || 'Destination N/A';
+
+            element.innerHTML = `
+                <div>${firstRowText}</div>
+                <div>${secondRowText}</div>
+            `;
+        }
+
+        function clearAlarmsForBlock(frontendBlockId) {
+            if (!frontendBlockId) return;
+            const keysToDelete = [];
+            activeAlarms.forEach((alarm, key) => {
+                if (alarm.frontend_block_id === frontendBlockId) {
+                    keysToDelete.push(key);
+                }
+            });
+            keysToDelete.forEach(key => activeAlarms.delete(key));
+            if (keysToDelete.length > 0) {
+                triggerImmediateAlarmConsoleUpdate(); // Re-render if alarms were cleared
+            }
+        }
+
 
         // Debounced function to trigger alarm console re-render with deduplication
         function triggerImmediateAlarmConsoleUpdate() {
             clearTimeout(alarmConsoleUpdateTimer);
-            alarmConsoleUpdateTimer = setTimeout(async () => { // Made async to await fetchAllAlarms
-                await fetchAllAlarms(); // Re-fetch all alarms from backend
-                
-                // After fetching, process for unique alarms
-                uniqueAlarmsMap.clear(); // Clear to re-populate
-                allCurrentAlarms.forEach(newAlarm => {
-                    const key = `${newAlarm.server_ip}-${newAlarm.message}-${newAlarm.device_name || ''}-${newAlarm.type || ''}`; // More robust key
-                    const existingAlarm = uniqueAlarmsMap.get(key);
+            alarmConsoleUpdateTimer = setTimeout(() => {
+                // Convert map values to array for sorting and rendering
+                const alarmsToDisplay = Array.from(activeAlarms.values());
 
-                    if (!existingAlarm || new Date(newAlarm.timestamp) > new Date(existingAlarm.timestamp)) {
-                        uniqueAlarmsMap.set(key, newAlarm);
-                    }
+                // Sort all alarms by timestamp (newest first) and then by severity
+                alarmsToDisplay.sort((a, b) => {
+                    const timeDiff = new Date(b.timestamp) - new Date(a.timestamp);
+                    if (timeDiff !== 0) return timeDiff;
+                    return SEVERITY_ORDER[b.severity.toUpperCase()] - SEVERITY_ORDER[a.severity.toUpperCase()];
                 });
 
-                allCurrentAlarms = Array.from(uniqueAlarmsMap.values());
-                allCurrentAlarms.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                renderAlarmConsole(allCurrentAlarms);
-                pendingAlarmsForConsole = []; // Clear buffer
+                renderAlarmConsole(alarmsToDisplay);
             }, IMMEDIATE_UPDATE_DELAY);
         }
 
-        // Function to fetch status for an individual iLO device and update its block
-        async function fetchIndividualIloStatus(channelNum, deviceId) {
-            const elementId = `channel-${channelNum}-${deviceId}`;
-            const element = document.getElementById(elementId);
-            if (!element) return { status: 'unknown', alarms: [] };
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/get_ilo_status/${channelNum}/${deviceId}`);
-                if (!response.ok) {
-                    console.error(`iLO Status Backend HTTP error for Channel ${channelNum} ${deviceId}: ${response.status}`);
-                    updateStatusBlock(elementId, 'unknown');
-                    return { status: 'unknown', alarms: [], error: `Backend responded with status ${response.status}` };
-                }
-                const data = await response.json();
-                const status = data.status;
-                const alarms = data.alarms || [];
-                updateStatusBlock(elementId, status);
-                return { status: status, alarms: alarms };
-            } catch (error) {
-                console.error(`Network or parsing error for Channel ${channelNum} ${deviceId}:`, error);
-                updateStatusBlock(elementId, 'unknown');
-                return { status: 'unknown', alarms: [], error: `Network error: ${error.message}` };
-            }
-        }
-
-        // Function to fetch collective iLO status for global blocks
-        async function fetchCollectiveIloStatus(groupBlock) {
-            const collectiveType = groupBlock.collectiveType;
-            const blockDivId = `global-${groupBlock.id}`;
-            const element = document.getElementById(blockDivId);
-
-            if (!collectiveType || !element) {
-                console.warn(`Global block for collective type '${collectiveType}' not found or element missing.`);
-                return { status: 'unknown', alarms: [] };
-            }
-
-            try {
-                // Special handling for D9800-PIRD if its collective status is derived differently
-                if (collectiveType === 'D9800-PIRD') {
-                    // For the main dashboard block, we want a summary. 
-                    // The IRD Overview page will have details.
-                    // This fetches general IRD status (from D9800IRD class)
-                    const response = await fetch(`${API_BASE_URL}/get_ird_status`); 
-                    if (!response.ok) {
-                        console.error(`IRD Collective Backend HTTP error for collective ${collectiveType}: ${response.status}`);
-                        updateStatusBlock(blockDivId, 'unknown');
-                        return { status: 'unknown', alarms: [], error: `Backend responded with status ${response.status}` };
-                    }
-                    const data = await response.json();
-                    // Assuming data.irds is a list of IRD statuses, we need to find the highest severity
-                    let overallIrdStatus = "ok";
-                    let irdAlarms = [];
-                    if (data.irds && Array.isArray(data.irds)) {
-                        const statuses = data.irds.map(ird => ird.overall_status);
-                        if (statuses.includes("Alarm")) overallIrdStatus = "alarm";
-                        else if (statuses.includes("Error")) overallIrdStatus = "alarm"; // Treat Error as alarm for dashboard
-                        else if (statuses.includes("Warning")) overallIrdStatus = "warning";
-                        
-                        data.irds.forEach(ird => {
-                            if (ird.errors && ird.errors.length > 0) {
-                                ird.errors.forEach(errMsg => {
-                                    irdAlarms.push({
-                                        server_ip: ird.ip_address,
-                                        message: errMsg,
-                                        severity: ird.overall_status === "Alarm" ? "CRITICAL" : "WARNING",
-                                        timestamp: new Date().toISOString(), // Use current time for dynamic alarms
-                                        device_name: `D9800 IRD ${ird.ip_address}`,
-                                        type: "ird_summary"
-                                    });
-                                });
-                            }
-                            if (ird.fault_status && ird.fault_status.length > 0) {
-                                ird.fault_status.forEach(fault => {
-                                    irdAlarms.push({
-                                        server_ip: ird.ip_address,
-                                        message: `Fault: ${fault.name} - ${fault.details}`,
-                                        severity: fault.severity.toUpperCase(),
-                                        timestamp: fault.setsince || new Date().toISOString(),
-                                        device_name: `D9800 IRD ${ird.ip_address}`,
-                                        type: "ird_fault"
-                                    });
-                                });
-                            }
-                        });
-                    }
-                    updateStatusBlock(blockDivId, overallIrdStatus);
-                    return { status: overallIrdStatus, alarms: irdAlarms };
-
-                } else {
-                    // Existing logic for other collective types
-                    const response = await fetch(`${API_BASE_URL}/get_collective_ilo_status/${collectiveType}`);
-                    if (!response.ok) {
-                        console.error(`iLO Collective Backend HTTP error for collective ${collectiveType}: ${response.status}`);
-                        updateStatusBlock(blockDivId, 'unknown');
-                        return { status: 'unknown', alarms: [], error: `Backend responded with status ${response.status}` };
-                    }
-                    const data = await response.json();
-                    const status = data.status;
-                    const alarms = data.alarms || [];
-                    updateStatusBlock(blockDivId, status);
-                    return { status: status, alarms: alarms };
-                }
-
-            } catch (error) {
-                console.error(`Network or parsing error for collective ${collectiveType}:`, error);
-                updateStatusBlock(blockDivId, 'unknown');
-                return { status: 'unknown', alarms: [], error: `Network error: ${error.message}` };
-            }
-        }
-
-        // Function to fetch Windows monitoring status
-        async function fetchWindowsStatus() {
-            const groupBlock = globalGroupStatusBlocks.find(b => b.id === 'GROUP_WINDOWS');
-            const blockDivId = `global-${groupBlock?.id}`;
-            const element = document.getElementById(blockDivId);
-            if (!groupBlock || !element) {
-                console.warn("Windows Processes global block not found or element missing.");
-                return { overall_status: 'unknown', alarms: [] };
-            }
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/get_windows_status`);
-                if (!response.ok) {
-                    console.error(`Windows Monitor Backend HTTP error: ${response.status}`);
-                    updateStatusBlock(blockDivId, 'unknown');
-                    return { overall_status: 'unknown', alarms: [], error: `Backend responded with status ${response.status}` };
-                }
-                const data = await response.json();
-                const overallStatus = data.overall_status;
-                updateStatusBlock(blockDivId, overallStatus);
-                return { overall_status: overallStatus, alarms: data.alarms || [] };
-            } catch (error) {
-                console.error(`Network or parsing error for Windows Monitor:`, error);
-                updateStatusBlock(blockDivId, 'unknown');
-                return { overall_status: 'unknown', alarms: [], error: `Network error: ${error.message}` };
-            }
-        }
-
-        // NEW: Function to fetch KMX block status (color) from Flask backend
-        async function fetchKmxBlockStatus() {
-            const groupBlock = globalGroupStatusBlocks.find(b => b.id === 'GROUP_KMX');
-            const blockDivId = `global-${groupBlock?.id}`;
-            const element = document.getElementById(blockDivId);
-            if (!groupBlock || !element) {
-                console.warn("KMX global block not found or element missing.");
-                return { overall_status: 'unknown' };
-            }
-
-            try {
-                const response = await fetch(`${API_BASE_URL}/get_kmx_block_status`); // New endpoint
-                if (!response.ok) {
-                    console.error(`KMX Block Status Backend HTTP error: ${response.status}`);
-                    updateStatusBlock(blockDivId, 'unknown');
-                    return { overall_status: 'unknown', error: `Backend responded with status ${response.status}` };
-                }
-                const data = await response.json();
-                const overallStatus = data.overall_status;
-                updateStatusBlock(blockDivId, overallStatus);
-                return { overall_status: overallStatus };
-            } catch (error) {
-                console.error(`Network or parsing error for KMX Block Status:`, error);
-                updateStatusBlock(blockDivId, 'unknown');
-                return { overall_status: 'unknown', error: `Network error: ${error.message}` };
-            }
-        }
-
-        // NEW: Function to fetch ALL active alarms from Flask backend
-        async function fetchAllAlarms() {
+        // Function to fetch all active alarms from Flask backend (Elasticsearch)
+        async function fetchAllAlarmsFromBackend() {
             try {
                 const response = await fetch(`${API_BASE_URL}/get_all_active_alarms`);
                 if (!response.ok) {
                     const errorText = await response.text();
-                    console.error(`Failed to fetch all alarms: ${response.status} - ${errorText}`);
+                    console.error(`Failed to fetch all alarms from backend: ${response.status} - ${errorText}`);
                     return;
                 }
                 const data = await response.json();
-                allCurrentAlarms = data.alarms || []; // Update the global alarms array
-                console.log(`Fetched ${allCurrentAlarms.length} alarms from backend.`);
+                
+                // Clear existing alarms and populate from backend
+                activeAlarms.clear();
+                (data.alarms || []).forEach(alarm => {
+                    // Ensure backend alarms also have a unique key for deduplication
+                    const alarmKey = `${alarm.server_ip}-${alarm.message}-${alarm.severity}-${alarm.frontend_block_id || ''}`;
+                    activeAlarms.set(alarmKey, alarm);
+                });
+                console.log(`Fetched ${activeAlarms.size} active alarms from backend.`);
+                triggerImmediateAlarmConsoleUpdate(); // Render after initial fetch
             } catch (error) {
                 console.error("Error fetching all alarms from backend:", error);
             }
         }
 
 
-        // Function to update all channel and global statuses (full refresh)
-        async function updateAllStatuses() {
-            console.log('Starting full update cycle: Fetching all statuses...');
-
-            // Fetch KMX block status first, as it's simpler
-            console.log('Fetching KMX block status...');
-            await fetchKmxBlockStatus(); // Update KMX block color
-
-            // 1. Fetch individual iLO channel statuses for all relevant devices (concurrently within this step)
-            console.log('Fetching all individual iLO channel statuses (VS_M, VS_P, VS_B)...');
-            const channelUpdatePromises = [];
-            for (let i = 1; i <= NUM_CHANNELS; i++) {
-                channelDevicesBlueprint.forEach(device => {
-                    if (device.usesIlo) {
-                        channelUpdatePromises.push(fetchIndividualIloStatus(i, device.id));
-                    }
-                });
-            }
-            await Promise.all(channelUpdatePromises);
-            console.log('Finished fetching individual iLO channel statuses.');
-
-            // 2. Fetch Windows monitoring status
-            console.log('Fetching Windows monitoring status...');
-            await fetchWindowsStatus();
-            console.log('Finished fetching Windows monitoring status.');
-
-            // 3. Fetch collective iLO statuses for global blocks (VS_M, VS_P, VS_B) and D9800-PIRD
-            console.log('Fetching collective statuses...');
-            const globalBlockPromises = globalGroupStatusBlocks
-                .filter(block => block.collectiveType && (block.collectiveType.startsWith('VS_') || block.collectiveType === 'D9800-PIRD'))
-                .map(block => fetchCollectiveIloStatus(block));
-            await Promise.all(globalBlockPromises);
-            console.log('Finished fetching collective iLO and IRD D9800 statuses.');
-
-            // 4. Fetch status for other global blocks (Encoder M, B, Cisco, Nexus)
-            console.log('Fetching other global block statuses...');
-            const otherGlobalBlockPromises = globalGroupStatusBlocks
-                .filter(block =>
-                    block.id !== 'GROUP_WINDOWS' &&
-                    block.id !== 'GROUP_KMX' &&
-                    block.collectiveType &&
-                    !block.collectiveType.startsWith('VS_') &&
-                    block.collectiveType !== 'D9800-PIRD'
-                )
-                .map(block => fetchCollectiveIloStatus(block));
-            await Promise.all(otherGlobalBlockPromises);
-            console.log('Finished fetching other global block statuses (excluding KMX and D9800-PIRD).');
-
-
-            // After all polling fetches, trigger a final, consolidated update to the alarm console
-            // The alarms are now fetched from Elasticsearch via `get_all_active_alarms`
-            triggerImmediateAlarmConsoleUpdate();
-            console.log('Full update cycle complete.');
-        }
-
         // Function to render the alarm console table
         function renderAlarmConsole(alarms) {
             const tableBody = document.getElementById('alarm-console-table-body');
-            tableBody.innerHTML = '';
+            tableBody.innerHTML = ''; // Clear existing rows
 
             if (alarms.length === 0) {
                 const noAlarmsRow = document.createElement('tr');
                 noAlarmsRow.innerHTML = `<td colspan="5" class="text-center py-4">No active alarms found.</td>`;
                 tableBody.appendChild(noAlarmsRow);
             } else {
+                // Limit to 30 alarms for display (adjust as needed for performance/readability)
                 const alarmsToDisplay = alarms.slice(0, 30);
                 alarmsToDisplay.forEach(alarm => {
                     const row = document.createElement('tr');
@@ -1230,19 +1137,17 @@
                         console.warn("Could not parse alarm timestamp:", alarm.timestamp, e);
                     }
 
-                    // Adjust display logic based on alarm 'type'
-                    const deviceDisplayName = (alarm.type === 'snmp_kmx' || alarm.type === 'snmp_kmx_trap')
-                                                ? alarm.device_name || 'KMX Device'
-                                                : (alarm.channel_name && alarm.device_name && alarm.device_name !== 'N/A')
-                                                    ? `${alarm.channel_name} - ${alarm.device_name}`
-                                                    : alarm.channel_name || alarm.device_name || alarm.server_ip || 'N/A';
+                    // 'channel_name' and 'device_name' are provided by the backend for both iLO and Windows
+                    // Also use IP for device name if display name is N/A
+                    const deviceDisplayName = (alarm.channel_name && alarm.channel_name !== 'N/A' && alarm.device_name && alarm.device_name !== 'N/A')
+                                                ? `${alarm.channel_name} - ${alarm.device_name}`
+                                                : alarm.channel_name || alarm.device_name || alarm.server_ip || 'N/A';
 
-                    const displayMessage = alarm.message || 'No Message';
 
                     row.innerHTML = `
                         <td>${deviceDisplayName}</td>
                         <td>${alarm.server_ip || 'N/A'}</td>
-                        <td>${displayMessage}</td>
+                        <td>${alarm.message || 'No Message'}</td>
                         <td>${alarm.severity || 'Unknown'}</td>
                         <td>${timeFormatted}</td>
                     `;
@@ -1253,23 +1158,43 @@
 
         // Function to open a new window with the full alarm console
         function openFullAlarmConsole() {
-            sessionStorage.setItem('fullAlarmList', JSON.stringify(allCurrentAlarms));
-            window.open('/alarm_console_fullscreen', '_blank'); 
+            sessionStorage.setItem('fullAlarmList', JSON.stringify(Array.from(activeAlarms.values()))); // Pass all active alarms
+            window.open('/alarm_console_fullscreen', '_blank');
             console.log("Attempting to open full alarm console.");
         }
         window.openFullAlarmConsole = openFullAlarmConsole;
 
+        // Function to fetch channel names from backend (MySQL)
+        async function fetchChannelNames() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/get_channel_configs`);
+                if (!response.ok) {
+                    console.error(`Failed to fetch channel configs: ${response.status}`);
+                    return;
+                }
+                const data = await response.json();
+                channelNamesMap.clear();
+                (data.channels || []).forEach(channel => {
+                    channelNamesMap.set(channel.id.toString(), channel.channel_name);
+                });
+                console.log("Channel names loaded:", channelNamesMap);
+            } catch (error) {
+                console.error("Error fetching channel names:", error);
+            }
+        }
+
         // Function to render the dashboard (channels and global blocks)
         async function renderDashboard() {
+            await fetchChannelNames(); // Fetch channel names before rendering
             const dashboardContainer = document.getElementById('dashboard');
             dashboardContainer.innerHTML = '';
 
             for (let i = 1; i <= NUM_CHANNELS; i++) {
-                const channelId = `channel-${i}`;
-                const channelName = `Channel ${String(i).padStart(2, '0')}`;
+                const channelIdNum = i; // Use the numerical ID for lookup
+                const channelName = channelNamesMap.get(channelIdNum.toString()) || `Channel ${String(i).padStart(2, '0')}`; // Use fetched name or default
 
                 const channelBlock = document.createElement('div');
-                channelBlock.id = channelId;
+                channelBlock.id = `channel-${channelIdNum}`; // ID based on numerical channel ID
                 channelBlock.className = 'channel-block';
 
                 let channelDevicesHtml = '';
@@ -1288,13 +1213,35 @@
                         const device = deviceMap.get(area);
                         if (device) {
                             let displayText = device.name;
-                            if (device.labelLines) {
+                            if (device.isPgm) {
+                                // For PGM blocks, initial display can be its original name
+                                displayText = device.originalName || device.name;
+                            } else if (device.labelLines) {
                                 displayText = device.labelLines.join('<br>');
                             }
+
+                            // Construct frontend_block_id based on pattern (C.channelid + device_specific_id)
+                            let frontendBlockSuffix = '';
+                            if (device.id === 'VS_M') frontendBlockSuffix = '01';
+                            else if (device.id === 'VS_P') frontendBlockSuffix = '02';
+                            else if (device.id === 'VS_B') frontendBlockSuffix = '03';
+                            else if (device.id === 'CP_VS42M') frontendBlockSuffix = '04';
+                            else if (device.id === 'CP_PGM42M') frontendBlockSuffix = '05';
+                            else if (device.id === 'DA_M') frontendBlockSuffix = '06';
+                            else if (device.id === 'DA_P') frontendBlockSuffix = '07';
+                            else if (device.id === 'DA_B') frontendBlockSuffix = '08';
+                            else if (device.id === 'DA_M_OUT') frontendBlockSuffix = '09';
+                            else if (device.id === 'DA_B_OUT') frontendBlockSuffix = '10';
+
+                            const dynamicFrontendBlockId = `C.${channelIdNum.toString().padStart(2, '0')}${frontendBlockSuffix}`;
+
                             channelDevicesHtml += `
-                                <div id="${channelId}-${device.id}"
-                                     class="device-status status-ok ${device.isLarge ? 'large-cp-block' : ''}"
-                                     data-area="${device.area}">
+                                <div id="${dynamicFrontendBlockId}"
+                                     class="device-status status-unknown ${device.isLarge ? 'large-cp-block' : ''}"
+                                     data-area="${device.area}"
+                                     data-channel-num="${channelIdNum}"
+                                     data-device-id="${device.id}"
+                                     data-frontend-block-id="${dynamicFrontendBlockId}">
                                     ${displayText}
                                 </div>
                             `;
@@ -1318,32 +1265,20 @@
 
             globalGroupStatusBlocks.forEach(groupBlock => {
                 const blockDiv = document.createElement('div');
-                blockDiv.id = `global-${groupBlock.id}`;
-                blockDiv.className = 'global-status-block status-ok';
+                blockDiv.id = `global-${groupBlock.id}`; // Matches the ID used in globalGroupStatusBlocks
+                blockDiv.className = 'global-status-block status-unknown'; // Default to unknown initially
+                blockDiv.setAttribute('data-group-id', groupBlock.id); // Add data attribute for easier lookup
 
-                let ipDisplay = '';
-                if (groupBlock.additional_ips && groupBlock.additional_ips.length > 0) {
-                    ipDisplay = groupBlock.additional_ips[0].ip;
-                    if (groupBlock.additional_ips.length > 1) {
-                        ipDisplay += ' (+ more)';
-                    }
-                } else if (groupBlock.id === 'GROUP_WINDOWS') {
-                    ipDisplay = 'Local Network';
-                } else if (groupBlock.id === 'GROUP_KMX') {
-                    ipDisplay = '172.19.185.230'; // Fixed IP for KMX, displayed
-                } else if (groupBlock.collectiveType === 'D9800-PIRD') { // Display IP range for IRD
-                     ipDisplay = '172.19.206.1-45';
-                }
-
+                const displayIp = groupBlock.displayIp || 'N/A';
 
                 blockDiv.innerHTML = `
                     <div class="block-name">${groupBlock.name}</div>
-                    <div class="block-ip">${ipDisplay || 'N/A'}</div>
+                    <div class="block-ip">${displayIp}</div>
                 `;
                 globalGroupStatusContainer.appendChild(blockDiv);
             });
-
-            updateAllStatuses();
+            // Initial poll to set statuses based on current ES data
+            await updateAllStatuses();
         }
 
         // --- Configuration Management Functions ---
@@ -1493,16 +1428,16 @@
             document.getElementById('global-config-form').reset();
             loadGlobalConfigs();
 
-            const newGlobalBlockId = `GROUP_${globalGroupName.replace(/\s+/g, '_').toUpperCase()}`;
+            const newGlobalBlockId = `G.${globalGroupName.replace(/\s+/g, '_').toUpperCase()}`; // Consistent ID generation
             const exists = globalGroupStatusBlocks.some(block => block.id === newGlobalBlockId);
             if (!exists) {
                 globalGroupStatusBlocks.push({
                     id: newGlobalBlockId,
                     name: globalGroupName,
                     collectiveType: globalDeviceGroup,
-                    additional_ips: [{ ip: globalDeviceIP, username: globalDeviceUser, password: globalDevicePass }]
+                    displayIp: globalDeviceIP // Add IP for display
                 });
-                renderDashboard();
+                renderDashboard(); // Re-render to show new block
             }
         }
         window.saveGlobalConfig = saveGlobalConfig;
@@ -1541,12 +1476,12 @@
             loadGlobalConfigs();
 
             if (deletedConfig) {
-                const removedDivId = `global-GROUP_${deletedConfig.globalGroupName.replace(/\s+/g, '_').toUpperCase()}`;
+                const removedDivId = `global-${deletedConfig.globalGroupName.replace(/\s+/g, '_').toUpperCase()}`; // Consistent ID generation
                 const elementToRemove = document.getElementById(removedDivId);
                 if (elementToRemove) {
                     elementToRemove.remove();
                 }
-                globalGroupStatusBlocks = globalGroupStatusBlocks.filter(block => block.id !== `GROUP_${deletedConfig.globalGroupName.replace(/\s+/g, '_').toUpperCase()}`);
+                globalGroupStatusBlocks = globalGroupStatusBlocks.filter(block => block.id !== `G.${deletedConfig.globalGroupName.replace(/\s+/g, '_').toUpperCase()}`); // Use consistent ID for filtering
                 renderDashboard();
             }
         }
@@ -1560,12 +1495,45 @@
         }
         window.showMessageBox = showMessageBox;
 
+        // Function to update all channel and global statuses (initial poll, then rely on WS)
+        async function updateAllStatuses() {
+            console.log('Starting initial UI status update from backend.');
+            await fetchAllAlarmsFromBackend(); // Get all current alarms from ES via Flask
+            
+            // Re-render blocks based on fetched active alarms
+            document.querySelectorAll('.device-status[data-frontend-block-id], .global-status-block[data-group-id]').forEach(element => {
+                let idToMatch = element.getAttribute('data-frontend-block-id') || element.getAttribute('data-group-id');
+                let highestSeverityForBlock = 'OK'; // Default to OK
+
+                // Find the highest severity alarm for this specific block from the fetched activeAlarms map
+                activeAlarms.forEach(alarm => {
+                    if (alarm.frontend_block_id === idToMatch || alarm.group_name === idToMatch) { // Check both
+                        if (SEVERITY_ORDER[alarm.severity.toUpperCase()] > SEVERITY_ORDER[highestSeverityForBlock.toUpperCase()]) {
+                            highestSeverityForBlock = alarm.severity;
+                        }
+
+                        // Also update PGM block content if it's a PGM mismatch alarm
+                        if (alarm.frontend_block_id === idToMatch && alarm.message && alarm.message.includes("PGM Routing MISMATCH")) {
+                            updatePgmBlockContent(element, alarm.message, alarm.dest_name, alarm.polled_value, alarm.expected_value);
+                        }
+                    }
+                });
+                updateStatusBlockFromWS(element, highestSeverityForBlock, highestSeverityForBlock);
+            });
+            console.log('Initial UI status update complete.');
+        }
+
+
         // Initialize the dashboard when the window loads
         window.onload = function() {
-            renderDashboard();
+            renderDashboard(); // Render static elements, then poll for initial statuses
             populateDeviceGroupDropdowns();
-            setInterval(updateAllStatuses, 60000); // Polls every 5 seconds for full refresh
-            showView('dashboard');
+            connectWebSocket(); // Establish WebSocket connection
+            // Polling interval is reduced significantly now as WS provides real-time updates.
+            // This interval is for a full refresh from backend (Elasticsearch) to catch anything missed by WS,
+            // or to ensure consistent state after page load.
+            setInterval(updateAllStatuses, 60000); // Polls every 60 seconds (1 minute)
+            showView('dashboard'); // Show dashboard view by default
         };
     </script>
 </body>
