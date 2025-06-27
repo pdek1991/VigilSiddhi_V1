@@ -25,6 +25,8 @@ REDIS_STREAM_NAMES = [
     "vs:agent:iloM_status",
     "vs:agent:iloP_status",
     "vs:agent:iloB_status",
+    "vs:agent:enc_iloM_status", # New stream for Compression M
+    "vs:agent:enc_iloB_status", # New stream for Compression B
     "vs:agent:ilo_status" # For devices not explicitly mapped
 ]
 CONSUMER_GROUP_NAME = "es_ingester_ilo_health"

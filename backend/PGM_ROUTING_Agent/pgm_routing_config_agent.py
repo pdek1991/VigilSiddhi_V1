@@ -151,10 +151,26 @@ async def process_single_pgm_routing_config(config):
     api_errors = []
 
     try:
-        # CORRECTED: Pass the 'domain' argument to check_pgm_routing_status
         routing_check_result = await pgm_routing_api_client.check_pgm_routing_status(
             ip_to_poll, SNMP_COMMUNITY_STRING, pgm_dest, router_source, domain
         )
+
+        # If a mismatch is detected, attempt to fetch the source_name for the polled value
+        if routing_check_result and routing_check_result.get("status") == "MISMATCH":
+            polled_source_value = routing_check_result.get("polled_source")
+            if polled_source_value and polled_source_value != "N/A":
+                logging.debug(f"Mismatch detected. Attempting to fetch source name for polled value: {polled_source_value}")
+                source_name_result = await pgm_routing_api_client.get_source_name_by_oid(
+                    ip_to_poll, SNMP_COMMUNITY_STRING, polled_source_value
+                )
+                if source_name_result.get("status") == "Success":
+                    routing_check_result["polled_source_name"] = source_name_result.get("value")
+                    logging.info(f"Fetched source name '{source_name_result.get('value')}' for polled value '{polled_source_value}'.")
+                else:
+                    routing_check_result["polled_source_name_status"] = source_name_result.get("status")
+                    routing_check_result["polled_source_name_message"] = source_name_result.get("message")
+                    logging.warning(f"Could not fetch source name for polled value '{polled_source_value}': {source_name_result.get('message')}")
+
     except Exception as e:
         logging.error(f"Error fetching PGM routing SNMP data for {pgm_dest} (IP: {ip_to_poll}): {e}", exc_info=True)
         api_errors.append(f"Unhandled error during SNMP data fetch: {e}")
@@ -196,7 +212,7 @@ async def process_single_pgm_routing_config(config):
         "severity": payload_severity,
         "status": payload_status,
         "details": {
-            "pgm_dest_check": routing_check_result if routing_check_result else {}, # Single check result
+            "pgm_dest_check": routing_check_result if routing_check_result else {}, # Single check result, now potentially includes polled_source_name
             "api_errors": api_errors
         }
     }
@@ -222,3 +238,4 @@ if __name__ == "__main__":
     except Exception as e:
         logging.critical(f"PGM Routing Config Agent terminated due to an unhandled error: {e}", exc_info=True)
         sys.exit(1)
+

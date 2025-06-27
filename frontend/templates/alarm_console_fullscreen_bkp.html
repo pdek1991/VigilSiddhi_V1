@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VigilSiddhi Alarm Console</title>
+    <link rel="icon" type="image/x-xicon" href="/media/logo.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for better visual impact and responsiveness */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark background */
+            color: #e2e8f0; /* Light text */
+            overflow-x: hidden; /* Prevent horizontal scrolling */
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh; /* Ensure body takes full viewport height */
+            margin: 0; /* Reset default body margin */
+            padding: 0; /* Reset default body padding */
+        }
+
+        .alarm-console-container {
+            padding: 1.5rem;
+            background-color: #2d3748;
+            border-radius: 0.6rem;
+            margin: 1rem auto;
+            width: 95%; /* Adjust width for full screen */
+            box-sizing: border-box;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            flex-grow: 1; /* Allow it to take available height */
+            display: flex;
+            flex-direction: column;
+            overflow-x: auto;
+        }
+
+        .filter-section {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            background-color: #2d3748;
+            border-radius: 0.6rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .filter-section label {
+            display: block;
+            margin-bottom: 0.4rem;
+            font-weight: 500;
+            color: #a0aec0;
+            font-size: 0.9rem;
+        }
+
+        .filter-section input[type="datetime-local"],
+        .filter-section input[type="text"],
+        .filter-section select {
+            width: 100%;
+            padding: 0.6rem;
+            border-radius: 0.375rem;
+            border: 1px solid #4a5568;
+            background-color: #1a202c;
+            color: #e2e8f0;
+            font-size: 0.9rem;
+        }
+
+        .filter-section button {
+            background-color: #63b3ed;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out;
+            margin-top: 1.5rem; /* Space below inputs */
+            width: 100%;
+        }
+
+        .filter-section button:hover {
+            background-color: #4299e1;
+        }
+
+        .alarm-console-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+
+        .alarm-console-table th,
+        .alarm-console-table td {
+            padding: 0.75rem;
+            border: 1px solid #4a5568; /* Darker border */
+            text-align: left;
+            font-size: 0.9rem;
+        }
+
+        .alarm-console-table th {
+            background-color: #4a5568; /* Header background */
+            font-weight: 700;
+            color: #e2e8f0;
+            white-space: nowrap; /* Prevent headers from wrapping */
+        }
+
+        .alarm-console-table td {
+            background-color: #2d3748; /* Cell background */
+            color: #cbd5e0;
+        }
+
+        /* Severity Colors for table rows/text if needed */
+        .severity-critical { color: #ef4444; } /* Red-500 */
+        .severity-major { color: #f97316; } /* Orange-500 */
+        .severity-minor { color: #fbbf24; } /* Yellow-400 */
+        .severity-warning { color: #3b82f6; } /* Blue-500 */
+        .severity-info { color: #22c55e; } /* Green-500 */
+        .severity-unknown { color: #6b7280; } /* Gray-500 */
+
+        /* Message box styles */
+        .message-box {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #2d3748;
+            border-radius: 0.6rem;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            padding: 2rem;
+            z-index: 1001;
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            color: #e2e8f0;
+            font-size: 1.1rem;
+            max-width: 80%;
+            text-align: center;
+        }
+        .message-box button {
+            background-color: #63b3ed;
+            color: white;
+            padding: 0.6rem 1.2rem;
+            border-radius: 0.4rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .message-box button:hover {
+            background-color: #4299e1;
+        }
+        .message-box.show {
+            display: flex;
+        }
+
+        @media (max-width: 768px) {
+            .filter-section {
+                grid-template-columns: 1fr;
+            }
+            .alarm-console-table th,
+            .alarm-console-table td {
+                padding: 0.6rem;
+                font-size: 0.8rem;
+            }
+        }
+        @media (max-width: 480px) {
+            .alarm-console-table th,
+            .alarm-console-table td {
+                padding: 0.4rem;
+                font-size: 0.7rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="py-4">
+        <header class="dashboard-header text-center text-3xl font-bold text-red-500 mb-6">
+            VigilSiddhi Active Alarm Console
+        </header>
+
+        <div class="filter-section">
+            <div>
+                <label for="filterStartTime">Start Time:</label>
+                <input type="datetime-local" id="filterStartTime">
+            </div>
+            <div>
+                <label for="filterEndTime">End Time:</label>
+                <input type="datetime-local" id="filterEndTime">
+            </div>
+            <div>
+                <label for="filterDeviceName">Device Name:</label>
+                <input type="text" id="filterDeviceName" placeholder="e.g., VSM, KMX, PGM01M">
+            </div>
+            <div>
+                <label for="filterChannelName">Channel Name:</label>
+                <input type="text" id="filterChannelName" placeholder="e.g., Channel One">
+            </div>
+            <div>
+                <label for="filterGroupName">Group Name:</label>
+                <input type="text" id="filterGroupName" placeholder="e.g., HP-iLO, Compression M">
+            </div>
+            <div>
+                <label for="filterAgentType">Agent Type:</label>
+                <select id="filterAgentType">
+                    <option value="">All</option>
+                    <option value="ilo_health">iLO Health</option>
+                    <option value="kmx_config">KMX Config</option>
+                    <option value="pgm_routing">PGM Routing</option>
+                    <option value="windows_monitor">Windows Monitor</option>
+                    <option value="ird_overview">IRD Overview</option>
+                    </select>
+            </div>
+            <div class="col-span-full flex justify-center gap-4">
+                <button onclick="fetchAlarmHistory()">Get Alarm History</button>
+                <button onclick="fetchAllAlarmsFromBackend()">Get Active Alarms</button>
+            </div>
+        </div>
+
+        <div id="alarm-console" class="alarm-console-container">
+            <h2 class="text-xl font-semibold text-center mb-4 text-red-400" id="alarm-console-title">All Active Alarms</h2>
+            <div class="overflow-x-auto flex-grow">
+                <table class="alarm-console-table">
+                    <thead>
+                        <tr>
+                            <th>Device Name</th>
+                            <th>IP Address</th>
+                            <th>Message</th>
+                            <th>Severity</th>
+                            <th>Time</th>
+                            <th>Agent Type</th>
+                        </tr>
+                    </thead>
+                    <tbody id="alarm-console-table-body">
+                        <tr><td colspan="6" class="text-center py-4">Loading active alarms...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="messageBox" class="message-box">
+        <h3 id="messageBoxTitle" class="text-xl font-bold mb-2"></h3>
+        <p id="messageBoxContent" class="text-md mb-4"></p>
+        <button onclick="document.getElementById('messageBox').classList.remove('show')">OK</button>
+    </div>
+
+    <script>
+        const WS_URL = "ws://127.0.0.1:8000"; // WebSocket Notifier URL
+        const API_BASE_URL = '/api/v1'; // Flask API base URL
+        let ws; // WebSocket instance
+
+        // Global map to store active alarms for the console
+        let activeAlarms = new Map();
+        let alarmConsoleUpdateTimer = null;
+        const IMMEDIATE_UPDATE_DELAY = 100; // milliseconds for debouncing
+
+        // Severity order for sorting
+        const SEVERITY_ORDER = {
+            'INFO': 0, 'OK': 0, 'NORMAL': 0,
+            'WARNING': 1, 'MINOR': 1,
+            'ALARM': 2, 'MAJOR': 2,
+            'ERROR': 3, 'CRITICAL': 3, 'FATAL': 3,
+            'UNKNOWN': -1
+        };
+
+        // Custom Message Box function
+        function showMessageBox(title, message) {
+            const msgBox = document.getElementById('messageBox');
+            document.getElementById('messageBoxTitle').textContent = title;
+            document.getElementById('messageBoxContent').textContent = message;
+            msgBox.classList.add('show');
+        }
+        window.showMessageBox = showMessageBox;
+
+        // --- WebSocket Logic ---
+        function connectWebSocket() {
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+                return;
+            }
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                console.log("WebSocket connected from Alarm Console!");
+            };
+
+            ws.onmessage = (event) => {
+                const message = JSON.parse(event.data);
+                console.log("WebSocket message received in Alarm Console:", message);
+                processWebSocketMessage(message);
+            };
+
+            ws.onclose = (event) => {
+                console.warn("WebSocket disconnected from Alarm Console:", event.code, event.reason);
+                setTimeout(connectWebSocket, 5000); // Attempt to reconnect
+            };
+
+            ws.onerror = (error) => {
+                console.error("WebSocket error in Alarm Console:", error);
+                ws.close();
+            };
+        }
+
+        function processWebSocketMessage(message) {
+            // These are real-time updates for ACTIVE alarms, so they update the 'activeAlarms' map.
+            const { frontend_block_id, group_name, status, severity, message: msgText, source_name, polled_value, expected_value, device_name, ip, time, agent_type, channel_name } = message;
+
+            // Alarms are added to the console if their severity is not 'OK' or 'NORMAL'
+            if (status && SEVERITY_ORDER[severity.toUpperCase()] > SEVERITY_ORDER['OK']) {
+                const alarmEntry = {
+                    device_name: device_name || 'N/A', // Use device_name directly from WS
+                    server_ip: ip || 'N/A', // Use ip directly from WS
+                    message: msgText || 'No message provided',
+                    severity: severity || 'UNKNOWN',
+                    timestamp: time || new Date().toISOString(),
+                    frontend_block_id: frontend_block_id || 'N/A', // Use frontend_block_id directly from WS
+                    type: agent_type || 'websocket', // Use 'type' for agent_type in display
+                    group_name: group_name || 'N/A', 
+                    channel_name: channel_name || 'N/A', // Include channel_name if present in WS message
+                    source_name: source_name || null // Store source_name if relevant (e.g., PGM)
+                };
+                
+                // Use a robust key for deduplication for active alarms
+                const alarmKey = `${alarmEntry.server_ip}-${alarmEntry.message}-${alarmEntry.severity}-${alarmEntry.frontend_block_id}`;
+                
+                if (!activeAlarms.has(alarmKey) || new Date(alarmEntry.timestamp) > new Date(activeAlarms.get(alarmKey).timestamp)) {
+                    activeAlarms.set(alarmKey, alarmEntry);
+                }
+                triggerImmediateAlarmConsoleUpdate(true); // Indicate it's an active alarm update
+            } else if (status && SEVERITY_ORDER[severity.toUpperCase()] <= SEVERITY_ORDER['OK']) {
+                // If status becomes OK, attempt to clear related alarms from console
+                clearAlarmsForBlock(frontend_block_id);
+            }
+        }
+
+        function clearAlarmsForBlock(frontendBlockId) {
+            if (!frontendBlockId) return;
+            const keysToDelete = [];
+            activeAlarms.forEach((alarm, key) => {
+                if (alarm.frontend_block_id === frontendBlockId) {
+                    keysToDelete.push(key);
+                }
+            });
+            keysToDelete.forEach(key => activeAlarms.delete(key));
+            if (keysToDelete.length > 0) {
+                triggerImmediateAlarmConsoleUpdate(true); // Re-render if alarms were cleared
+            }
+        }
+
+        function triggerImmediateAlarmConsoleUpdate(isActiveAlarms = true) {
+            clearTimeout(alarmConsoleUpdateTimer);
+            alarmConsoleUpdateTimer = setTimeout(() => {
+                const alarmsToDisplay = Array.from(activeAlarms.values());
+                alarmsToDisplay.sort((a, b) => {
+                    const timeDiff = new Date(b.timestamp) - new Date(a.timestamp);
+                    if (timeDiff !== 0) return timeDiff;
+                    return SEVERITY_ORDER[b.severity.toUpperCase()] - SEVERITY_ORDER[a.severity.toUpperCase()];
+                });
+                renderAlarmConsole(alarmsToDisplay, isActiveAlarms);
+            }, IMMEDIATE_UPDATE_DELAY);
+        }
+
+        // --- Filtering and Fetching Alarm History ---
+
+        async function fetchAlarmHistory() {
+            const startTime = document.getElementById('filterStartTime').value;
+            const endTime = document.getElementById('filterEndTime').value;
+            const deviceName = document.getElementById('filterDeviceName').value;
+            const channelName = document.getElementById('filterChannelName').value;
+            const groupName = document.getElementById('filterGroupName').value;
+            const agentType = document.getElementById('filterAgentType').value;
+
+            const params = new URLSearchParams();
+            if (startTime) params.append('start_time', new Date(startTime).toISOString());
+            if (endTime) params.append('end_time', new Date(endTime).toISOString());
+            if (deviceName) params.append('device_name', deviceName);
+            if (channelName) params.append('channel_name', channelName);
+            if (groupName) params.append('group_name', groupName);
+            if (agentType) params.append('agent_type', agentType);
+
+            const queryString = params.toString();
+            const url = `${API_BASE_URL}/get_alarm_history?${queryString}`;
+            
+            document.getElementById('alarm-console-title').textContent = 'Alarm History';
+            const tableBody = document.getElementById('alarm-console-table-body');
+            tableBody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Fetching alarm history...</td></tr>';
+            console.log('Fetching alarm history from URL:', url); // DEBUG: Log the URL
+
+            try {
+                const response = await fetch(url);
+                console.log('Response status for alarm history:', response.status); // DEBUG: Log response status
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`Failed to fetch alarm history: ${response.status} - ${errorText}`);
+                    showMessageBox("Error", `Failed to fetch alarm history: ${response.status} - ${errorText}`);
+                    renderAlarmConsole([], false); // Clear and show no data
+                    return;
+                }
+                const data = await response.json();
+                console.log('Received alarm history data:', data); // DEBUG: Log received data
+                renderAlarmConsole(data.alarms || [], false); // Pass false for isActiveAlarms as it's history
+            } catch (error) {
+                console.error("Error fetching alarm history:", error);
+                showMessageBox("Error", `An error occurred while fetching alarm history: ${error.message}`);
+                renderAlarmConsole([], false);
+            }
+        }
+        window.fetchAlarmHistory = fetchAlarmHistory; // Expose globally
+
+        // Function to fetch ALL active alarms from Flask backend (Elasticsearch) on page load
+        async function fetchAllAlarmsFromBackend() {
+            document.getElementById('alarm-console-title').textContent = 'All Active Alarms';
+            const tableBody = document.getElementById('alarm-console-table-body');
+            tableBody.innerHTML = '<tr><td colspan="6" class="text-center py-4">Loading active alarms...</td></tr>';
+            console.log('Fetching all active alarms from URL:', `${API_BASE_URL}/get_all_active_alarms`); // DEBUG: Log URL
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/get_all_active_alarms`);
+                console.log('Response status for active alarms:', response.status); // DEBUG: Log response status
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`Failed to fetch active alarms: ${response.status} - ${errorText}`);
+                    showMessageBox("Error", `Failed to fetch active alarms: ${response.status} - ${errorText}`);
+                    renderAlarmConsole([], true);
+                    return;
+                }
+                const data = await response.json();
+                console.log('Received active alarms data:', data); // DEBUG: Log received data
+                
+                activeAlarms.clear(); // Clear existing and repopulate
+                (data.alarms || []).forEach(alarm => {
+                    // Ensure the alarm object has all necessary fields, adding defaults if missing
+                    // Aligning field names with what Elasticsearch returns from consumers/agents
+                    const fullAlarm = {
+                        device_name: alarm.device_name || alarm.group_name || 'N/A', // Using device_name first
+                        server_ip: alarm.device_ip || 'N/A', // Frontend expects 'server_ip', ES sends 'device_ip'
+                        message: alarm.message || 'No message provided',
+                        severity: alarm.severity || 'UNKNOWN',
+                        timestamp: alarm.timestamp || new Date().toISOString(),
+                        frontend_block_id: alarm.block_id || 'N/A', // ES uses 'block_id'
+                        type: alarm.type || 'N/A', // ES uses 'type' for agent_type
+                        group_name: alarm.group_name || 'N/A',
+                        channel_name: alarm.channel_name || 'N/A' 
+                    };
+                    const alarmKey = `${fullAlarm.server_ip}-${fullAlarm.message}-${fullAlarm.severity}-${fullAlarm.frontend_block_id}`;
+                    activeAlarms.set(alarmKey, fullAlarm);
+                });
+                console.log(`Fetched ${activeAlarms.size} active alarms from backend for full console.`);
+                triggerImmediateAlarmConsoleUpdate(true); // Render after initial fetch, indicate active alarms
+            } catch (error) {
+                console.error("Error fetching all alarms from backend:", error);
+                showMessageBox("Error", `An error occurred while fetching active alarms: ${error.message}`);
+                renderAlarmConsole([], true);
+            }
+        }
+        window.fetchAllAlarmsFromBackend = fetchAllAlarmsFromBackend; // Expose globally
+
+        // Function to render the alarm console table
+        function renderAlarmConsole(alarms, isActiveAlarmsView) {
+            const tableBody = document.getElementById('alarm-console-table-body');
+            tableBody.innerHTML = ''; // Clear existing rows
+
+            // Update column headers based on view
+            const tableHeader = document.querySelector('.alarm-console-table thead tr');
+            tableHeader.innerHTML = `
+                <th>Device Name</th>
+                <th>IP Address</th>
+                <th>Message</th>
+                <th>Severity</th>
+                <th>Time</th>
+                <th>Agent Type</th>
+            `;
+
+            if (alarms.length === 0) {
+                const noAlarmsRow = document.createElement('tr');
+                noAlarmsRow.innerHTML = `<td colspan="6" class="text-center py-4">${isActiveAlarmsView ? 'No active alarms found.' : 'No alarm history found for the selected filters.'}</td>`;
+                tableBody.appendChild(noAlarmsRow);
+            } else {
+                alarms.forEach(alarm => {
+                    console.log('Rendering alarm entry:', alarm); // DEBUG: Log each alarm object before rendering
+                    const row = document.createElement('tr');
+                    let timeFormatted = alarm.timestamp;
+                    try {
+                        const date = new Date(alarm.timestamp);
+                        timeFormatted = date.toLocaleString();
+                    } catch (e) {
+                        console.warn("Could not parse alarm timestamp:", alarm.timestamp, e);
+                    }
+
+                    // Determine CSS class for severity coloring based on predefined classes
+                    const severityClass = `severity-${(alarm.severity || 'UNKNOWN').toLowerCase()}`;
+                    
+                    // Construct display name, prioritizing frontend_block_id, then channel, then device_name
+                    let displayDeviceName = alarm.device_name || 'N/A';
+                    if (alarm.frontend_block_id && alarm.frontend_block_id !== 'N/A' && alarm.frontend_block_id !== alarm.device_name) {
+                        displayDeviceName = `${alarm.frontend_block_id} (${alarm.device_name || 'N/A'})`;
+                    }
+                    if (alarm.channel_name && alarm.channel_name !== 'N/A') {
+                        displayDeviceName = `${alarm.channel_name} - ${displayDeviceName}`;
+                    }
+
+                    row.innerHTML = `
+                        <td class="${severityClass}">${displayDeviceName}</td>
+                        <td class="${severityClass}">${alarm.server_ip || 'N/A'}</td>
+                        <td class="${severityClass}">${alarm.message || 'No Message'}</td>
+                        <td class="${severityClass}">${alarm.severity || 'Unknown'}</td>
+                        <td class="${severityClass}">${timeFormatted}</td>
+                        <td class="${severityClass}">${alarm.type || 'N/A'}</td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+            }
+        }
+
+        // Initialize the console when the window loads
+        window.onload = function() {
+            // Set default time filters for the last 24 hours
+            const now = new Date();
+            const twentyFourHoursAgo = new Date(now.getTime() - (24 * 60 * 60 * 1000));
+            document.getElementById('filterEndTime').value = now.toISOString().substring(0, 16);
+            document.getElementById('filterStartTime').value = twentyFourHoursAgo.toISOString().substring(0, 16);
+
+            // Retrieve alarms from sessionStorage if navigated from main dashboard (for active alarms)
+            const storedAlarms = sessionStorage.getItem('fullAlarmList');
+            if (storedAlarms) {
+                activeAlarms = new Map(JSON.parse(storedAlarms).map(alarm => {
+                    // Re-create key for deduplication consistency. Ensure fullAlarm structure is used here too.
+                    const fullAlarm = { // Reconstruct to ensure consistency
+                        device_name: alarm.device_name || alarm.group_name || 'N/A', 
+                        server_ip: alarm.server_ip || 'N/A', 
+                        message: alarm.message || 'No message provided',
+                        severity: alarm.severity || 'UNKNOWN',
+                        timestamp: alarm.timestamp || new Date().toISOString(),
+                        frontend_block_id: alarm.frontend_block_id || 'N/A', 
+                        type: alarm.type || 'N/A', 
+                        group_name: alarm.group_name || 'N/A',
+                        channel_name: alarm.channel_name || 'N/A'
+                    };
+                    const key = `${fullAlarm.server_ip}-${fullAlarm.message}-${fullAlarm.severity}-${fullAlarm.frontend_block_id}`;
+                    return [key, fullAlarm];
+                }));
+                renderAlarmConsole(Array.from(activeAlarms.values()), true); // Initial render as active alarms
+                sessionStorage.removeItem('fullAlarmList'); // Clear it after use
+            } else {
+                fetchAllAlarmsFromBackend(); // If opened directly, fetch all active alarms from backend
+            }
+            connectWebSocket(); // Establish WebSocket connection
+        };
+    </script>
+</body>
+</html>

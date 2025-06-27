@@ -258,8 +258,8 @@
             background-color: #2d3748;
             border-radius: 0.6rem;
             margin: 0.75rem auto; /* Center with auto margins and add vertical space */
-            width: 100%; /* Take full width */
-            box-sizing: border-box; /* Include padding in width */
+            width: 100%;
+            box-sizing: border-box;
             box-shadow: 0 3px 5px rgba(0, 0, 0, 0.1);
             flex-shrink: 0;
             overflow-x: auto; /* Allow horizontal scrolling for table on small screens */
@@ -933,6 +933,50 @@
             };
         }
 
+        /**
+         * Normalizes a channel ID part of a frontend_block_id string.
+         * It extracts the numeric part, pads it with a leading '0' if it's a single digit (1-9),
+         * and returns it as a string. Multi-digit numbers remain unchanged.
+         * This function handles cases like "C.104", "C.1004", "C.5004" where the channel number
+         * could have varying digits. It ensures that the channel ID portion is consistently formatted
+         * for lookup against the `pgmRoutingMap`.
+         * Examples: "1" -> "01", "9" -> "09", "10" -> "10", "100" -> "100".
+         * @param {string} idPart - The numeric part of the channel ID (e.g., "1", "10", "100", "50").
+         * @returns {string} The normalized channel ID string.
+         */
+        function normalizeChannelIdPart(idPart) {
+            const num = parseInt(idPart, 10);
+            if (isNaN(num)) {
+                return idPart; // Return as is if not a valid number
+            }
+            // For channels 1-9, add a leading zero. For 10 and above, keep as is.
+            // This ensures "1" -> "01", "9" -> "09", but "10" -> "10", "100" -> "100"
+            return num >= 1 && num <= 9 && idPart.length === 1 ? `0${num}` : `${num}`;
+        }
+
+
+        /**
+         * Helper function to get the standardized frontendBlockSuffix from the blueprint based on device ID.
+         * @param {string} deviceId - The ID of the device (e.g., 'VS_M', 'CP_VS42M').
+         * @returns {string} The standardized suffix for the frontend block ID.
+         */
+        function frontendBlockSuffixForId(deviceId) {
+            const device = channelDevicesBlueprint.find(d => d.id === deviceId);
+            if (device && device.frontendBlockSuffix) {
+                return device.frontendBlockSuffix;
+            }
+            // Fallback for non-PGM blocks if frontendBlockSuffix is not explicitly defined in blueprint
+            if (deviceId === 'VS_M') return '01';
+            if (deviceId === 'VS_P') return '02';
+            if (deviceId === 'VS_B') return '03';
+            if (deviceId === 'DA_M') return '06';
+            if (deviceId === 'DA_P') return '07';
+            if (deviceId === 'DA_B') return '08';
+            if (deviceId === 'DA_M_OUT') return '09';
+            if (deviceId === 'DA_B_OUT') return '10';
+            return ''; // Should not happen if all blueprints are complete
+        }
+
         function processWebSocketMessage(message) {
             // Added router_source, polled_value, expected_value, dest_name to destructuring
             const { frontend_block_id, group_name, status, severity, message: msgText, pgm_dest, polled_value, expected_value, router_source } = message; 
@@ -945,13 +989,17 @@
                 if (frontend_block_id.startsWith('C.')) {
                     // Channel block ID format: C.<channel_id><device_code>
                     // Extract channel number and device ID from frontend_block_id
-                    const match = frontend_block_id.match(/^C\.(\d+)([A-Z_]+|\d+)$/); // Allow device_code to be digits or text
+                    const match = frontend_block_id.match(/^C\.(\d+)([A-Z_]+|\d+)$/); // Allows device_code to be digits or text
                     if (match) {
-                        const channelNum = parseInt(match[1]);
-                        const deviceCode = match[2]; // e.g., 101 for VSM, 04 for PGM block
-                        currentChannelNum = channelNum; // Store channel number
+                        const channelNumRaw = match[1]; // e.g., "1", "10", "100"
+                        const deviceCode = match[2]; // e.g., "04", "VS_M"
+                        
+                        currentChannelNum = parseInt(channelNumRaw, 10); // Store raw channel number for PGM content logic
 
+                        const normalizedChannelNum = normalizeChannelIdPart(channelNumRaw);
+                        
                         let deviceBlueprint = null;
+                        // Find device blueprint using the exact deviceCode part (e.g., '04' or 'VS_M')
                         if (!isNaN(parseInt(deviceCode))) { // If deviceCode is numeric (like '04', '05')
                             const effectiveDeviceCode = (parseInt(deviceCode)).toString().padStart(2, '0'); // Ensure '04' for lookup
                             deviceBlueprint = channelDevicesBlueprint.find(d => d.frontendBlockSuffix === effectiveDeviceCode);
@@ -960,15 +1008,14 @@
                         }
 
                         if (deviceBlueprint) {
-                            // Normalize the incoming frontend_block_id to match the dashboard's generated IDs
-                            const normalizedFrontendBlockId = `C.${String(channelNum).padStart(2, '0')}${frontendBlockSuffixForId(deviceBlueprint.id)}`;
-                            targetId = normalizedFrontendBlockId; 
+                            // Reconstruct targetId using normalized channel number and blueprint suffix
+                            targetId = `C.${normalizedChannelNum}${frontendBlockSuffixForId(deviceBlueprint.id)}`;
                         } else {
                             console.warn(`Could not find device blueprint for frontend_block_id: ${frontend_block_id}`);
                         }
 
                     } else {
-                        console.warn(`Invalid channel frontend_block_id format: ${frontend_block_id}`);
+                        console.warn(`Invalid channel frontend_block_id format from WS: ${frontend_block_id}`);
                     }
                 } else { // Global block
                     targetId = `global-${frontend_block_id}`; // Global blocks have a fixed prefix
@@ -989,11 +1036,10 @@
                     updateStatusBlockFromWS(element, status, severity);
 
                     // Special handling for PGM blocks (C.XX04, C.XX05 etc.)
-                    const blockIsPgm = channelDevicesBlueprint.some(d => 
-                        frontend_block_id.endsWith(d.frontendBlockSuffix) && d.isPgm
-                    );
+                    // Check if the target element's dataset identifies it as a PGM block
+                    const isPgmBlockElement = element.dataset.isPgm === 'true';
 
-                    if (blockIsPgm) {
+                    if (isPgmBlockElement) {
                         // Pass all relevant PGM fields to the update function
                         updatePgmBlockContent(element, msgText, pgm_dest, polled_value, expected_value, router_source, currentChannelNum); 
                     }
@@ -1023,6 +1069,16 @@
                     expected_value: expected_value,
                     router_source: router_source // This is the source_name from consumer
                 };
+                // Normalize frontend_block_id in alarmEntry before storing in activeAlarms map
+                if (alarmEntry.frontend_block_id && alarmEntry.frontend_block_id.startsWith('C.')) {
+                    const match = alarmEntry.frontend_block_id.match(/^C\.(\d+)([0-9A-Z_]+)$/);
+                    if (match) {
+                        const channelNumRaw = match[1];
+                        const deviceSuffix = match[2];
+                        alarmEntry.frontend_block_id = `C.${normalizeChannelIdPart(channelNumRaw)}${deviceSuffix}`;
+                    }
+                }
+
                 // Use a more robust key for deduplication to prevent duplicate alarms for the same issue
                 const alarmKey = `${alarmEntry.server_ip}-${alarmEntry.message}-${alarmEntry.severity}-${alarmEntry.frontend_block_id}`;
                 
@@ -1044,31 +1100,13 @@
             // Add the new status class
             element.classList.add(desiredClass);
         }
-
-        // Helper function to get frontendBlockSuffix from blueprint based on device ID
-        function frontendBlockSuffixForId(deviceId) {
-            const device = channelDevicesBlueprint.find(d => d.id === deviceId);
-            if (device && device.frontendBlockSuffix) {
-                return device.frontendBlockSuffix;
-            }
-            // Fallback for non-PGM blocks if frontendBlockSuffix is not explicitly defined in blueprint
-            if (deviceId === 'VS_M') return '01';
-            if (deviceId === 'VS_P') return '02';
-            if (deviceId === 'VS_B') return '03';
-            if (deviceId === 'DA_M') return '06';
-            if (deviceId === 'DA_P') return '07';
-            if (deviceId === 'DA_B') return '08';
-            if (deviceId === 'DA_M_OUT') return '09';
-            if (deviceId === 'DA_B_OUT') return '10';
-            return ''; // Should not happen if all blueprints are complete
-        }
-
+        
         // Modified updatePgmBlockContent to use router_source and pgm_dest for display, and handle channel name
         function updatePgmBlockContent(element, message, pgmDestFromWS, polledValueFromWS, expectedValueFromWS, routerSourceFromWS, channelNum) {
             const blockId = element.dataset.frontendBlockId;
-            const pgmConfig = pgmRoutingMap.get(blockId) || {};
-            // Channel name for PGM blocks (e.g., C.104, C.204) should come from pgmRoutingMap
-            // Fallback to a generic channel name if not found in pgmConfig
+            const pgmConfig = pgmRoutingMap.get(blockId) || {}; // Use the normalized blockId to get config
+            
+            // Channel name for PGM blocks should now directly come from pgmConfig.channel_name
             const channelNameFromPgmConfig = pgmConfig.channel_name || `Channel ${String(channelNum).padStart(2, '0')}`;
 
             let firstRowText = '';
@@ -1117,7 +1155,12 @@
         // Function to fetch all active alarms from Flask backend (Elasticsearch)
         async function fetchAllAlarmsFromBackend() {
             try {
-                const response = await fetch(`${API_BASE_URL}/get_all_active_alarms`);
+                // Corrected API endpoint to match main.py's historical alarms endpoint
+                const response = await fetch(`${API_BASE_URL}/historical_alarms`, {
+                    method: 'GET', // main.py's historical_alarms is GET
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
                 if (!response.ok) {
                     const errorText = await response.text();
                     console.error(`Failed to fetch all alarms from backend: ${response.status} - ${errorText}`);
@@ -1127,12 +1170,16 @@
                 
                 // Clear existing alarms and populate from backend
                 activeAlarms.clear();
+                // Access 'alarms' array directly as per main.py's response structure
                 (data.alarms || []).forEach(alarm => {
                     // Normalize frontend_block_id from alarm before storing
-                    if (alarm.frontend_block_id && alarm.frontend_block_id.startsWith('C.') && alarm.frontend_block_id.match(/^C\.(\d)([0-9A-Z_]+)$/)) {
-                         alarm.frontend_block_id = alarm.frontend_block_id.replace(/^C\.(\d)([0-9A-Z_]+)$/, (match, channelNum, suffix) => {
-                            return `C.0${channelNum}${suffix}`;
-                        });
+                    if (alarm.frontend_block_id && alarm.frontend_block_id.startsWith('C.')) {
+                        const match = alarm.frontend_block_id.match(/^C\.(\d+)([0-9A-Z_]+)$/);
+                        if (match) {
+                            const channelNumRaw = match[1];
+                            const deviceSuffix = match[2];
+                            alarm.frontend_block_id = `C.${normalizeChannelIdPart(channelNumRaw)}${deviceSuffix}`;
+                        }
                     }
                     // Ensure backend alarms also have a unique key for deduplication
                     const alarmKey = `${alarm.server_ip}-${alarm.message}-${alarm.severity}-${alarm.frontend_block_id || ''}`;
@@ -1191,6 +1238,15 @@
         function openFullAlarmConsole(blockId) {
             let url = '/alarm_console_fullscreen';
             if (blockId) {
+                // Normalize the blockId before passing to the full console
+                if (blockId.startsWith('C.')) {
+                    const match = blockId.match(/^C\.(\d+)([0-9A-Z_]+)$/);
+                    if (match) {
+                        const channelNumRaw = match[1];
+                        const deviceSuffix = match[2];
+                        blockId = `C.${normalizeChannelIdPart(channelNumRaw)}${deviceSuffix}`;
+                    }
+                }
                 url += `?block_id=${blockId}`;
             }
             window.open(url, '_blank');
@@ -1209,7 +1265,8 @@
                 const data = await response.json();
                 channelNamesMap.clear();
                 (data.channels || []).forEach(channel => {
-                    channelNamesMap.set(channel.id.toString(), channel.channel_name);
+                    // Ensure the key in channelNamesMap is also normalized (e.g., "01", "10", "100")
+                    channelNamesMap.set(normalizeChannelIdPart(channel.id.toString()), channel.channel_name);
                 });
                 console.log("Channel names loaded:", channelNamesMap);
             } catch (error) {
@@ -1229,12 +1286,18 @@
                 pgmRoutingMap.clear();
                 (data.pgm_configs || []).forEach(config => {
                     if (config.frontend_block_id) {
-                        // Normalize frontend_block_id from DB to ensure leading zeros for channel numbers 1-9
-                        // Example: "C.104" becomes "C.0104" if the channel number is single digit
-                        const normalizedId = config.frontend_block_id.replace(/^C\.(\d)([0-9A-Z_]+)$/, (match, channelNum, suffix) => {
-                            return `C.0${channelNum}${suffix}`;
-                        });
-                        pgmRoutingMap.set(normalizedId, config);
+                        // Normalize frontend_block_id from DB before storing in map
+                        const match = config.frontend_block_id.match(/^C\.(\d+)([0-9A-Z_]+)$/);
+                        if (match) {
+                            const channelNumRaw = match[1];
+                            const deviceSuffix = match[2];
+                            const normalizedId = `C.${normalizeChannelIdPart(channelNumRaw)}${deviceSuffix}`;
+                            pgmRoutingMap.set(normalizedId, config);
+                        } else {
+                            // If the format is unexpected, store as is, but log a warning
+                            console.warn(`PGM Config frontend_block_id format unexpected: ${config.frontend_block_id}`);
+                            pgmRoutingMap.set(config.frontend_block_id, config);
+                        }
                     }
                 });
                 console.log("PGM Routing configurations loaded:", pgmRoutingMap);
@@ -1252,8 +1315,8 @@
 
             for (let i = 1; i <= NUM_CHANNELS; i++) {
                 const channelIdNum = i; // Use the numerical ID for lookup
-                // This 'channelName' is for the overall channel block heading (h2)
-                const channelNameForHeading = channelNamesMap.get(String(i).padStart(2, '0')) || `Channel ${String(i).padStart(2, '0')}`;
+                // This 'channelNameForHeading' now correctly uses the normalized channel ID for lookup
+                const channelNameForHeading = channelNamesMap.get(normalizeChannelIdPart(String(i))) || `Channel ${String(i).padStart(2, '0')}`;
 
                 const channelBlock = document.createElement('div');
                 channelBlock.id = `channel-${channelIdNum}`; // ID based on numerical channel ID
@@ -1278,17 +1341,14 @@
                             let dynamicFrontendBlockId = '';
 
                             // Construct frontend_block_id based on pattern (C.channelid + device_specific_id)
-                            let frontendBlockSuffix = '';
-                            if (device.frontendBlockSuffix) {
-                                frontendBlockSuffix = device.frontendBlockSuffix;
-                            } else {
-                                frontendBlockSuffix = frontendBlockSuffixForId(device.id); // Get suffix from helper
-                            }
+                            let frontendBlockSuffix = frontendBlockSuffixForId(device.id);
 
-                            dynamicFrontendBlockId = `C.${String(channelIdNum).padStart(2, '0')}${frontendBlockSuffix}`; // Ensure channel ID is 2 digits
+                            // Use normalizeChannelIdPart when generating the ID for the HTML element
+                            dynamicFrontendBlockId = `C.${normalizeChannelIdPart(String(channelIdNum))}${frontendBlockSuffix}`;
 
                             if (device.isPgm) {
                                 // For PGM blocks, use fetched PGM routing data for initial display
+                                // Use the normalized dynamicFrontendBlockId for lookup in pgmRoutingMap
                                 const pgmConfig = pgmRoutingMap.get(dynamicFrontendBlockId);
                                 if (pgmConfig) {
                                     // Top row: router_source - pgm_dest from DB
@@ -1297,6 +1357,7 @@
                                                    <div class="text-xs">${pgmConfig.channel_name || 'Channel N/A'}</div>`; // Use pgmConfig.channel_name
                                 } else {
                                     // Fallback if no PGM config found for this block ID
+                                    console.log(`PGM config not found for blockId: ${dynamicFrontendBlockId}. Displaying default content.`);
                                     displayText = `<div class="text-xs font-bold">${device.name}</div><div class="text-xs">Config Missing</div>`;
                                 }
                             } else {
@@ -1311,6 +1372,7 @@
                                      data-channel-num="${channelIdNum}"
                                      data-device-id="${device.id}"
                                      data-frontend-block-id="${dynamicFrontendBlockId}"
+                                     data-is-pgm="${device.isPgm}"
                                      onclick="openFullAlarmConsole('${dynamicFrontendBlockId}')">
                                     ${displayText}
                                 </div>
@@ -1595,7 +1657,7 @@
                 const isPgmBlock = deviceBlueprint && deviceBlueprint.isPgm;
                 const channelNum = element.dataset.channelNum;
                 // For the main channel name, still use the channelNamesMap
-                const channelNameForHeading = channelNamesMap.get(String(channelNum).padStart(2, '0')) || `Channel ${String(channelNum).padStart(2, '0')}`;
+                const channelNameForHeading = channelNamesMap.get(normalizeChannelIdPart(String(channelNum))) || `Channel ${String(channelNum).padStart(2, '0')}`;
 
 
                 if (latestAlarmForBlock) {

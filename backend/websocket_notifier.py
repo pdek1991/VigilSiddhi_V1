@@ -29,66 +29,58 @@ async def unregister_client(websocket):
 
 async def broadcast_message(message):
     """Sends a message to all connected WebSocket clients."""
-    if not CONNECTED_CLIENTS:
-        logging.info("No WebSocket clients connected to broadcast message.")
-        return
-
-    # Convert message to JSON string
-    json_message = json.dumps(message)
-
-    disconnected_clients = []
-    for websocket in CONNECTED_CLIENTS:
-        try:
-            await websocket.send(json_message)
-            logging.debug(f"Broadcasted to {websocket.remote_address}: {json_message}")
-        except websockets.exceptions.ConnectionClosedOK:
-            logging.warning(f"Client {websocket.remote_address} was already closed.")
-            disconnected_clients.append(websocket)
-        except Exception as e:
-            logging.error(f"Error broadcasting to {websocket.remote_address}: {e}", exc_info=True)
-            disconnected_clients.append(websocket)
+    # Convert message to JSON string if it's a dict
+    message_str = json.dumps(message) if isinstance(message, dict) else message
     
-    # Remove disconnected clients
-    for client in disconnected_clients:
-        CONNECTED_CLIENTS.discard(client)
-    logging.info(f"Message broadcasted. Remaining clients: {len(CONNECTED_CLIENTS)}")
-
+    # Create a list of tasks to send message to each client
+    # Filter out websockets that are not open
+    send_tasks = [
+        client.send(message_str) for client in CONNECTED_CLIENTS if client.open
+    ]
+    # Use asyncio.gather to run send tasks concurrently
+    # return_exceptions=True allows the other tasks to complete even if one fails
+    if send_tasks:
+        done, pending = await asyncio.wait(send_tasks, timeout=5) # 5 second timeout for sending
+        for task in done:
+            if task.exception():
+                logging.error(f"Error broadcasting message to client: {task.exception()}")
+    else:
+        logging.debug("No active WebSocket clients to broadcast message to.")
 
 async def websocket_handler(websocket, path):
-    """Handles incoming WebSocket connections."""
+    """Handles WebSocket connections."""
+    # This function is designed to receive 'path' as an argument by the websockets library.
+    # The TypeError suggests the calling context (your local setup/websockets version) isn't providing it.
+    logging.info(f"WebSocket connection established on path: {path}")
     await register_client(websocket)
     try:
-        async for message in websocket:
-            logging.info(f"Received message from WS client {websocket.remote_address}: {message}")
-            # Optionally, you could parse and rebroadcast messages received from clients
-            # For this use case, consumers are sending via HTTP, so this path is less critical.
-    except websockets.exceptions.ConnectionClosedError as e:
-        logging.info(f"WebSocket connection closed unexpectedly for {websocket.remote_address}: {e}")
-    except Exception as e:
-        logging.error(f"Error in WebSocket handler for {websocket.remote_address}: {e}", exc_info=True)
+        # Keep the connection open indefinitely
+        # Or handle incoming messages if the frontend sends any (e.g., pings, commands)
+        await websocket.wait_closed()
     finally:
         await unregister_client(websocket)
 
 async def http_notify_handler(request):
-    """HTTP endpoint to receive notifications from agents and broadcast them."""
+    """
+    Handles incoming HTTP POST requests to notify WebSocket clients.
+    Expected to receive JSON payload from agents/consumers.
+    """
     try:
         data = await request.json()
-        logging.info(f"Received HTTP notification from {request.remote}: {json.dumps(data)}")
+        logging.info(f"Received HTTP notification from {request.remote}: {data}")
         await broadcast_message(data)
-        return web.Response(text="Notification received and broadcasted.", status=200)
+        return web.Response(text="Notification sent", status=200)
     except json.JSONDecodeError:
-        logging.error(f"Invalid JSON received from {request.remote}")
+        logging.error(f"Received invalid JSON from {request.remote}")
         return web.Response(text="Invalid JSON", status=400)
     except Exception as e:
-        logging.error(f"Error in HTTP notify handler for {request.remote}: {e}", exc_info=True)
+        logging.error(f"Error in HTTP notification handler: {e}", exc_info=True)
         return web.Response(text=f"Internal Server Error: {e}", status=500)
 
 async def main():
-    """Starts both WebSocket server and HTTP notification server."""
-    loop = asyncio.get_running_loop() # Get the current event loop
-
+    """Main function to start WebSocket and HTTP servers."""
+    # Start WebSocket server
     logging.info(f"Starting WebSocket server on ws://{WS_HOST}:{WS_PORT}")
-    # websockets.serve returns a Server object which itself is a Future/Task that can be awaited
     websocket_server_obj = await websockets.serve(websocket_handler, WS_HOST, WS_PORT)
 
     # Setup aiohttp application and runner
@@ -97,25 +89,34 @@ async def main():
     runner = web.AppRunner(app)
     await runner.setup()
 
-    # Create aiohttp server directly using loop.create_server
-    http_server_coro = loop.create_server(runner.app.make_handler(), HTTP_NOTIFY_HOST, HTTP_NOTIFY_PORT)
-    http_server_obj = await http_server_coro
+    # Create and start the aiohttp TCPSite
+    site = web.TCPSite(runner, HTTP_NOTIFY_HOST, HTTP_NOTIFY_PORT)
+    await site.start() 
 
     logging.info(f"Starting HTTP notification server on http://{HTTP_NOTIFY_HOST}:{HTTP_NOTIFY_PORT}/notify")
-    logging.debug("Awaiting both WebSocket and HTTP servers to run continuously...")
+    logging.debug("Awaiting WebSocket server to run. Aiohttp server is running in background.")
     
-    # Gather both server tasks. wait_closed() will keep them alive until explicitly stopped.
-    await asyncio.gather(
-        websocket_server_obj.wait_closed(), # The websockets server object has a wait_closed() method
-        http_server_obj.wait_closed() # The aiohttp server object also has a wait_closed() method
-    )
-    logging.debug("Both servers have stopped. This message should not appear unless manually stopped.")
+    try:
+        # Await the WebSocket server to close. This keeps the event loop running.
+        # The aiohttp server (managed by 'runner') will continue running alongside it.
+        await websocket_server_obj.wait_closed()
+    except asyncio.CancelledError:
+        # This exception is raised when asyncio.run() or gather cancels tasks (e.g., on KeyboardInterrupt)
+        logging.info("WebSocket server task cancelled, initiating aiohttp cleanup.")
+    except Exception as e:
+        logging.error(f"Unexpected error while awaiting WebSocket server closure: {e}", exc_info=True)
+    finally:
+        # Ensure aiohttp runner is properly cleaned up when the application exits
+        logging.info("Shutting down aiohttp runner and its site.")
+        await runner.cleanup() # This correctly cleans up the aiohttp resources
+
+    logging.info("All servers have stopped.")
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logging.info("Server stopped by user.")
+        logging.info("WebSocket Notifier stopped by user (KeyboardInterrupt).")
     except Exception as e:
-        logging.critical(f"Server crashed: {e}", exc_info=True)
+        logging.critical(f"WebSocket Notifier terminated due to an unhandled error: {e}", exc_info=True)

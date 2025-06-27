@@ -26,13 +26,14 @@ MYSQL_PASSWORD = os.environ.get('MYSQL_PASSWORD', 'vigilsiddhi')
 REDIS_HOST = os.environ.get('REDIS_HOST', '192.168.56.30')
 REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
 
-# Redis Stream Names based on device_name mapping
+# Redis Stream Names based on device_name mapping AND Group_name
 REDIS_STREAM_MAP = {
     "VSM": "vs:agent:iloM_status",
     "VSP": "vs:agent:iloP_status",
     "VSB": "vs:agent:iloB_status",
-    # Default stream if device_name does not match
-    "DEFAULT": "vs:agent:ilo_status" 
+    "Compression M": "vs:agent:enc_iloM_status", # New stream for Compression M
+    "Compression B": "vs:agent:enc_iloB_status", # New stream for Compression B
+    "DEFAULT": "vs:agent:ilo_status" # For devices not explicitly mapped by device_name or group_name
 }
 POLLING_INTERVAL_SECONDS = 300 # Poll iLO configs every 5 minutes
 
@@ -116,8 +117,8 @@ async def fetch_and_publish_ilo_configs():
     #       "username": "...",
     #       "password": "...",
     #       "frontend_blocks": [
-    #           {"frontend_block_id": "C.102", "device_name": "VSP", "Group_name": "GroupA"},
-    #           {"frontend_block_id": "C.202", "device_name": "VSP", "Group_name": "GroupA"}
+    #           {"frontend_block_id": "C.102", "device_name": "VSP", "group_name": "GroupA"},
+    #           {"frontend_block_id": "C.202", "device_name": "VSP", "group_name": "GroupA"}
     #       ]
     #   }
     # }
@@ -128,7 +129,7 @@ async def fetch_and_publish_ilo_configs():
         password = config.get('password')
         frontend_block_id = config.get('frontend_block_id')
         device_name = config.get('device_name')
-        group_name = config.get('Group_name') # Retrieve the new Group_name
+        group_name = config.get('Group_name') # Retrieve the new Group_name from DB
 
         if not ip_address or not username or not password or not frontend_block_id or not device_name:
             logging.warning(f"Skipping malformed iLO config entry from DB: {config}")
@@ -188,8 +189,8 @@ async def process_unique_ilo_device(ip_address, username, password, frontend_blo
 
         logging.info(f"Publishing status for IP: {ip_address}, Frontend Block ID: {current_frontend_block_id}, Device Name: {current_device_name}, Group Name: {current_group_name}")
 
-        # Determine Redis stream name based on current_device_name
-        stream_name = REDIS_STREAM_MAP.get(current_device_name, REDIS_STREAM_MAP["DEFAULT"])
+        # Determine Redis stream name based on current_group_name first, then current_device_name
+        stream_name = REDIS_STREAM_MAP.get(current_group_name, REDIS_STREAM_MAP.get(current_device_name, REDIS_STREAM_MAP["DEFAULT"]))
 
         redis_payload = {
             "timestamp": datetime.utcnow().isoformat() + "Z",

@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Elasticsearch Alarm Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+        }
+        .container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        .filters {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        .filter-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        .filter-group input[type="text"],
+        .filter-group input[type="datetime-local"],
+        .filter-group select {
+            width: calc(100% - 12px);
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .filter-group button {
+            padding: 10px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        .filter-group button:hover {
+            background-color: #0056b3;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+            color: #333;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            font-size: 18px;
+            color: #666;
+        }
+        .no-results {
+            text-align: center;
+            padding: 20px;
+            font-size: 16px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Elasticsearch Alarm Data</h1>
+
+        <div class="filters">
+            <div class="filter-group">
+                <label for="startDate">Start Date/Time:</label>
+                <input type="datetime-local" id="startDate">
+            </div>
+            <div class="filter-group">
+                <label for="endDate">End Date/Time:</label>
+                <input type="datetime-local" id="endDate">
+            </div>
+            <div class="filter-group">
+                <label for="messageFilter">Message:</label>
+                <input type="text" id="messageFilter" placeholder="Filter by message">
+            </div>
+            <div class="filter-group">
+                <label for="deviceNameFilter">Device Name:</label>
+                <input type="text" id="deviceNameFilter" placeholder="Filter by device name">
+            </div>
+            <div class="filter-group">
+                <label for="severityFilter">Severity:</label>
+                <select id="severityFilter">
+                    <option value="">All</option>
+                    <option value="CRITICAL">CRITICAL</option>
+                    <option value="MAJOR">MAJOR</option>
+                    <option value="MINOR">MINOR</option>
+                    <option value="WARNING">WARNING</option>
+                    <option value="INFO">INFO</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="typeFilter">Type:</label>
+                <input type="text" id="typeFilter" placeholder="Filter by type">
+            </div>
+            <div class="filter-group">
+                <label for="deviceIpFilter">Device IP:</label>
+                <input type="text" id="deviceIpFilter" placeholder="Filter by device IP">
+            </div>
+            <div class="filter-group">
+                <label for="groupNameFilter">Group Name:</label>
+                <input type="text" id="groupNameFilter" placeholder="Filter by group name">
+            </div>
+            <div class="filter-group">
+                <button onclick="fetchAlarms()">Apply Filters</button>
+            </div>
+        </div>
+
+        <div id="loading" class="loading" style="display: none;">Loading data...</div>
+        <div id="no-results" class="no-results" style="display: none;">No alarms found for the selected filters.</div>
+
+        <table id="alarmTable">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Message</th>
+                    <th>Device Name</th>
+                    <th>Severity</th>
+                    <th>Type</th>
+                    <th>Device IP</th>
+                    <th>Group Name</th>
+                </tr>
+            </thead>
+            <tbody>
+                </tbody>
+        </table>
+    </div>
+
+    <script>
+        // !! IMPORTANT: Replace with your Elasticsearch host and index
+        const ELASTICSEARCH_HOST = 'http://localhost:9200'; // Or your public IP/domain
+        const ELASTICSEARCH_INDEX = 'your_alarm_index'; // Replace with your actual index name
+
+        async function fetchAlarms() {
+            const tbody = document.querySelector('#alarmTable tbody');
+            const loadingDiv = document.getElementById('loading');
+            const noResultsDiv = document.getElementById('no-results');
+
+            tbody.innerHTML = ''; // Clear previous results
+            loadingDiv.style.display = 'block'; // Show loading message
+            noResultsDiv.style.display = 'none'; // Hide no results message
+
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const messageFilter = document.getElementById('messageFilter').value;
+            const deviceNameFilter = document.getElementById('deviceNameFilter').value;
+            const severityFilter = document.getElementById('severityFilter').value;
+            const typeFilter = document.getElementById('typeFilter').value;
+            const deviceIpFilter = document.getElementById('deviceIpFilter').value;
+            const groupNameFilter = document.getElementById('groupNameFilter').value;
+
+            // Build the Elasticsearch query body
+            let queryBody = {
+                query: {
+                    bool: {
+                        must: []
+                    }
+                },
+                sort: [
+                    { "timestamp": { "order": "desc" } } // Sort by timestamp descending
+                ],
+                size: 100 // Limit the number of results, adjust as needed
+            };
+
+            // Add date range filter
+            if (startDate || endDate) {
+                const range = {};
+                if (startDate) {
+                    range.gte = new Date(startDate).toISOString();
+                }
+                if (endDate) {
+                    range.lte = new Date(endDate).toISOString();
+                }
+                queryBody.query.bool.must.push({
+                    range: {
+                        timestamp: range
+                    }
+                });
+            }
+
+            // Add text/keyword filters (using match for text, term for keyword)
+            if (messageFilter) {
+                queryBody.query.bool.must.push({
+                    match: { message: messageFilter }
+                });
+            }
+            if (deviceNameFilter) {
+                queryBody.query.bool.must.push({
+                    term: { device_name: deviceNameFilter }
+                });
+            }
+            if (severityFilter) {
+                queryBody.query.bool.must.push({
+                    term: { severity: severityFilter }
+                });
+            }
+            if (typeFilter) {
+                queryBody.query.bool.must.push({
+                    term: { type: typeFilter }
+                });
+            }
+            if (deviceIpFilter) {
+                queryBody.query.bool.must.push({
+                    term: { device_ip: deviceIpFilter }
+                });
+            }
+            if (groupNameFilter) {
+                queryBody.query.bool.must.push({
+                    term: { group_name: groupNameFilter }
+                });
+            }
+
+            // If no filters are applied, just get all documents (or a sample)
+            if (queryBody.query.bool.must.length === 0) {
+                queryBody.query = { match_all: {} };
+            }
+
+            try {
+                const response = await fetch(`${ELASTICSEARCH_HOST}/${ELASTICSEARCH_INDEX}/_search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                        // If you have authentication (e.g., basic auth), add it here:
+                        // 'Authorization': 'Basic ' + btoa('username:password')
+                    },
+                    body: JSON.stringify(queryBody)
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                }
+
+                const data = await response.json();
+                const hits = data.hits.hits;
+
+                if (hits.length === 0) {
+                    noResultsDiv.style.display = 'block';
+                } else {
+                    hits.forEach(hit => {
+                        const source = hit._source;
+                        const row = tbody.insertRow();
+                        row.insertCell().textContent = new Date(source.timestamp).toLocaleString();
+                        row.insertCell().textContent = source.message;
+                        row.insertCell().textContent = source.device_name;
+                        row.insertCell().textContent = source.severity;
+                        row.insertCell().textContent = source.type;
+                        row.insertCell().textContent = source.device_ip;
+                        row.insertCell().textContent = source.group_name;
+                    });
+                }
+            } catch (error) {
+                console.error('Error fetching data from Elasticsearch:', error);
+                alert('Failed to fetch data. Check console for details and ensure Elasticsearch is running and accessible (CORS, authentication).');
+            } finally {
+                loadingDiv.style.display = 'none'; // Hide loading message
+            }
+        }
+
+        // Fetch alarms on page load
+        document.addEventListener('DOMContentLoaded', fetchAlarms);
+    </script>
+</body>
+</html>

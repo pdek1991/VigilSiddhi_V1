@@ -74,35 +74,54 @@ async def process_message(message_id, payload):
     logging.info("-" * 50)
 
     current_status = payload.get('status')
-    # CORRECTED: Get the single pgm_dest_check dictionary
     pgm_dest_check = payload.get('details', {}).get('pgm_dest_check', {})
     api_errors = payload.get('details', {}).get('api_errors', [])
+
+    # Extract additional details for ES and WS
+    polled_source = pgm_dest_check.get('polled_source', 'N/A')
+    expected_source = pgm_dest_check.get('expected_source', 'N/A')
+    source_name = pgm_dest_check.get('polled_source_name', 'N/A') # Renamed from polled_source_name to source_name
 
     # --- Index to monitor_historical_alarms ---
     # Only index to Elasticsearch if the overall status is NOT 'ok' AND there's a specific issue
     if current_status != 'ok':
         # Check if there's a specific routing mismatch or error
         if pgm_dest_check and pgm_dest_check.get("status") in ["MISMATCH", "Error"]:
+            
+            # Construct alarm message including polled, expected, and source_name values
             alarm_doc_message = (
                 f"PGM Routing Alarm - Destination: {pgm_dest_check.get('pgm_dest', 'N/A')}, "
-                f"Polled: '{pgm_dest_check.get('polled_source', 'N/A')}', "
-                f"Expected: '{pgm_dest_check.get('expected_source', 'N/A')}', "
-                f"OID: {pgm_dest_check.get('oid', 'N/A')}"
+                f"Polled Source: '{polled_source}', Expected Source: '{expected_source}'"
             )
+            if source_name and source_name != 'N/A':
+                alarm_doc_message += f", Source Name: '{source_name}'"
+            alarm_doc_message += f", OID: {pgm_dest_check.get('oid', 'N/A')}"
+            
+            # If the status from pgm_dest_check is "Error", it means SNMP polling itself had an issue
             if pgm_dest_check.get("status") == "Error":
-                alarm_doc_message = f"PGM Routing SNMP Error - Dest: {pgm_dest_check.get('pgm_dest', 'N/A')}, Message: {pgm_dest_check.get('message', 'N/A')}, OID: {pgm_dest_check.get('oid', 'N/A')}"
+                alarm_doc_message = (
+                    f"PGM Routing SNMP Error - Dest: {pgm_dest_check.get('pgm_dest', 'N/A')}, "
+                    f"Message: {pgm_dest_check.get('message', 'N/A')}, "
+                    f"OID: {pgm_dest_check.get('oid', 'N/A')}"
+                )
 
             alarm_doc = {
                 "alarm_id": str(uuid.uuid4()),
                 "timestamp": payload.get('timestamp'),
                 "message": alarm_doc_message, # Use the detailed message for ES
                 "device_name": payload.get('device_name'),
-                "block_id": payload.get('frontend_block_id'),
+                "block_id": payload.get('frontend_block_id'), # Added frontend_block_id
                 "severity": payload.get('severity').upper(),
                 "type": payload.get('agent_type'),
                 "device_ip": payload.get('device_ip'),
-                "group_name": payload.get('group_name')
+                "group_name": payload.get('group_name'),
+                "pgm_dest": pgm_dest_check.get('pgm_dest', 'N/A'), # Add pgm_dest for filtering
+                "polled_source": polled_source, # Added polled_source
+                "expected_source": expected_source, # Added expected_source
             }
+            if source_name and source_name != 'N/A':
+                alarm_doc["source_name"] = source_name # Renamed from polled_source_name to source_name
+
             try:
                 es.index(index="monitor_historical_alarms", document=alarm_doc)
                 logging.info(f"Indexed PGM routing alarm/error '{alarm_doc['alarm_id']}' for {payload.get('device_ip')} to Elasticsearch.")
@@ -114,7 +133,7 @@ async def process_message(message_id, payload):
                 "timestamp": payload.get('timestamp'),
                 "message": payload.get('message'), # Use the main error message from agent
                 "device_name": payload.get('device_name'),
-                "block_id": payload.get('frontend_block_id'),
+                "block_id": payload.get('frontend_block_id'), # Added frontend_block_id
                 "severity": payload.get('severity').upper(),
                 "type": payload.get('agent_type'),
                 "device_ip": payload.get('device_ip'),
@@ -131,18 +150,30 @@ async def process_message(message_id, payload):
         logging.info(f"Skipping Elasticsearch indexing for {payload.get('device_ip')} as status is 'ok'.")
 
     # --- WebSocket Notification ---
-    # CORRECTED: Include "mismatch" in the statuses that trigger a notification
     if current_status in ["alarm", "error", "warning", "mismatch"]:
         websocket_message = {
             "device_name": payload.get('device_name'),
             "ip": payload.get('device_ip'),
             "time": payload.get('timestamp'),
             "message": payload.get('message'), # Send the overall message from the agent
-            "severity": payload.get('severity') # Send the overall severity
+            "severity": payload.get('severity'), # Send the overall severity
+            "frontend_block_id": payload.get('frontend_block_id'), # Added frontend_block_id
+            "pgm_dest": pgm_dest_check.get('pgm_dest', 'N/A'), # Add pgm_dest for display
+            "polled_value": polled_source, # Renamed to align with frontend
+            "expected_value": expected_source, # Renamed to align with frontend
         }
+        
+        # If there's a source_name, add it as router_source to the WS message
+        if source_name and source_name != 'N/A':
+            websocket_message["router_source"] = source_name # ALIGNED: Sending as 'router_source' for frontend
+            
+            # The agent is now expected to put the "Polled Source Name" into the 'message' string.
+            # So, we will not append it again here to avoid duplication.
+            # The structured fields (polled_source, expected_source, source_name) are still
+            # included separately for easier programmatic access in the frontend.
+
         await send_websocket_notification(websocket_message)
     else:
-        # CORRECTED: Log "matching" status more accurately if it's 'ok'
         log_message = f"Skipping WebSocket notification for {payload.get('device_ip')} as status is '{current_status}'"
         if current_status == "ok":
             log_message += " (matching)."

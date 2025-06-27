@@ -294,6 +294,7 @@ class MySQLManager:
     def get_pgm_routing_configs(self):
         # Includes 'id' as it's typically a primary key and useful for updates/deletes
         query = "SELECT id, pgm_dest, router_source, frontend_block_id, domain, channel_name FROM pgm_routing"
+
         return self._execute_query(query, fetch_all=True)
     
     def get_pgm_routing_config_by_id(self, config_id):

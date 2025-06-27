@@ -537,7 +537,7 @@
                 }
 
                 // Changed to call /api/get_alarms as per test_main.py's endpoint
-                const response = await fetch("/api/get_alarms", {
+                const response = await fetch("/api/v1/get_alarm_history", {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(fetchBody)

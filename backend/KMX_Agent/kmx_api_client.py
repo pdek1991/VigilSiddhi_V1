@@ -10,6 +10,7 @@ from pysnmp.hlapi.v1arch.asyncio import (
 )
 from pysnmp.proto import rfc1902 # For Null object check
 import asyncio # Explicitly import asyncio for async operations if needed outside hlapi
+import re # NEW: Import the regex module
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s') # Set to DEBUG for more info
 
@@ -289,31 +290,112 @@ class KMXAPIClient:
             logging.debug(f"DEBUG:   Calling _get_snmp_value for Severity OID (tuple): {current_severity_oid_tuple}, String: {original_severity_oid_str}")
             severity_result = await self._get_snmp_value(ip, community, current_severity_oid_tuple, original_severity_oid_str)
             
-            if severity_result.get("value") != "10000": # Only process if not "normal" severity
-                logging.debug(f"DEBUG:   Calling _get_snmp_value for Device Name OID (tuple): {current_device_name_oid_tuple}, String: {original_device_name_oid_str}")
-                device_name_result = await self._get_snmp_value(ip, community, current_device_name_oid_tuple, original_device_name_oid_str)
-                device_name = device_name_result.get("value") # Get raw value for "HCO" check
+            # Always fetch device_name and actual_value to apply new custom logic
+            logging.debug(f"DEBUG:   Calling _get_snmp_value for Device Name OID (tuple): {current_device_name_oid_tuple}, String: {original_device_name_oid_str}")
+            device_name_result = await self._get_snmp_value(ip, community, current_device_name_oid_tuple, original_device_name_oid_str)
+            device_name = device_name_result.get("value") # Get raw value for "HCO" and "PGM" checks
 
-                # Check for "HCO" in device name (raw value) and specific actual value for special alarm
+            logging.debug(f"DEBUG:   Calling _get_snmp_value for Actual Value OID (tuple): {current_actual_value_oid_tuple}, String: {original_actual_value_oid_str}")
+            actual_value_result = await self._get_snmp_value(ip, community, current_actual_value_oid_tuple, original_actual_value_oid_str)
+            actual_value = actual_value_result.get("value", "") # Get raw value for "source *" check
+
+            # --- NEW: ALARM FILTERING/SUPPRESSION LOGIC (PREVENTS ADDING TO final_results) ---
+            # Define the PGM patterns for filtering (the ones that should be ignored if source* is present)
+            # Reusing the patterns for device name checks from the custom alarm logic.
+            pgm_patterns_for_filtering = [ 
+                r"PGM-B",
+                r"PGM B",
+                r"PGM_B",
+                r"PGM.*BKP", 
+                r"PGM.* BKP",
+                r"PGM.*B" 
+            ]
+            
+            is_device_name_pgm_for_filtering = False
+            if device_name:
+                for pattern in pgm_patterns_for_filtering:
+                    if re.search(pattern, device_name, re.IGNORECASE):
+                        is_device_name_pgm_for_filtering = True
+                        break
+            
+            # Check if actual_value contains "source " for the filtering condition
+            contains_source_star_for_filtering = "source " in actual_value
+
+            # If both conditions for filtering are met, skip this alarm completely.
+            if is_device_name_pgm_for_filtering and contains_source_star_for_filtering:
+                logging.info(f"Filtered out alarm for PGM-related device '{device_name}' with actual value '{actual_value}' (contains 'source *') for IP {ip}, Child ID {child_id_str}.")
+                continue # Skip processing this alarm and move to the next child_id
+            # --- END NEW ALARM FILTERING/SUPPRESSION LOGIC ---
+
+
+            # --- NEW ALARM CONDITION LOGIC (MODIFIED FURTHER, now applies only if not filtered above) ---
+            # Using regex patterns for more robust matching of PGM strings
+            pgm_patterns_for_device_name = [
+                r"PGM-B",
+                r"PGM B", # literal space
+                r"PGM_B",
+                r"PGM.*BKP", # PGM followed by any characters, then BKP
+                r"PGM.* BKP", # PGM followed by any characters, then space BKP
+                r"PGM.*B" # PGM followed by any characters, then B (to cover PGM32B etc.)
+            ]
+            
+            is_pgm_related_in_device_name = False
+            if device_name:
+                for pattern in pgm_patterns_for_device_name:
+                    if re.search(pattern, device_name, re.IGNORECASE):
+                        is_pgm_related_in_device_name = True
+                        break
+
+            contains_source_star_in_actual_value = "source " in actual_value
+
+            # New suppression patterns for actual_value
+            suppress_pgm_patterns_in_actual_value = [
+                r"PGM.*B",
+                r"PGM-B",
+                r"PGM.* BKP"
+            ]
+            actual_value_contains_suppress_pgm_keywords = False
+            if actual_value:
+                for pattern in suppress_pgm_patterns_in_actual_value:
+                    if re.search(pattern, actual_value, re.IGNORECASE):
+                        actual_value_contains_suppress_pgm_keywords = True
+                        break
+
+            if (is_pgm_related_in_device_name and 
+                not contains_source_star_in_actual_value and 
+                not actual_value_contains_suppress_pgm_keywords):
+                
+                logging.info(f"Custom Alarm Triggered: PGM-related device '{device_name}' with actual value '{actual_value}' (no 'source *' AND no suppress PGM keywords) for IP {ip}, Child ID {child_id_str}.")
+                
+                custom_alarm_entry = {
+                    "severity": "CRITICAL",
+                    "deviceName": device_name_result.get("interpreted", "N/A"),
+                    "actualValue": f"KMX PGM Alarm: {device_name} - {actual_value}", # Adjusted actualValue slightly for clarity
+                    "oid": original_severity_oid_str,
+                    "status": "Success",
+                    "message": f"KMX PGM Alarm: {device_name} - {actual_value}"
+                }
+                final_results.append(custom_alarm_entry)
+                continue
+            # --- END NEW ALARM CONDITION LOGIC ---
+
+
+            if severity_result.get("value") != "10000": # Only process if not "normal" severity
                 special_alarm_message = None
                 if device_name is not None and "HCO" in device_name:
                     logging.debug(f"Skipping alarm for {ip} child ID {child_id_str} due to 'HCO' in device name: {device_name}")
                     # Special check for "source 24;source 24" with "HCO"
-                    actual_value_result = await self._get_snmp_value(ip, community, current_actual_value_oid_tuple, original_actual_value_oid_str)
-                    if actual_value_result.get("value") == "source 24;source 24":
+                    if actual_value == "source 24;source 24":
                         special_alarm_message = "HCO is on input 2"
                         logging.info(f"Special alarm detected for {ip}: {special_alarm_message}")
                     else:
                         continue # Skip if it's HCO but not the special "source 24" case
 
-                logging.debug(f"DEBUG:   Calling _get_snmp_value for Actual Value OID (tuple): {current_actual_value_oid_tuple}, String: {original_actual_value_oid_str}")
-                actual_value_result = await self._get_snmp_value(ip, community, current_actual_value_oid_tuple, original_actual_value_oid_str)
-
                 entry = {}
                 entry["severity"] = severity_result.get("interpreted", "N/A")
                 entry["deviceName"] = device_name_result.get("interpreted", "N/A")
                 
-                final_actual_value = actual_value_result.get("value", "")
+                final_actual_value = actual_value
                 if "source 23;source 23" == final_actual_value:
                     final_actual_value = ""
                 # Use the special_alarm_message if set, otherwise original logic

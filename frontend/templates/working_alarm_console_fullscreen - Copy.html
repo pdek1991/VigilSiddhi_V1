@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Historical Alarms</title>
-    <!-- Favicon using GIF for broader compatibility and consistency -->
-    <link rel="icon" type="image/gif" href="/static/logo.gif">
+    <!-- Favicon using PNG for broader compatibility -->
+    <link rel="icon" type="image/png" href="/static/logo.png">
     <!-- Added .ico favicon for broader compatibility -->
     <link rel="icon" type="image/x-icon" href="/static/logo.ico">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -381,7 +381,7 @@
     <header>
         <div class="left">
             <!-- Logo now uses GIF and fills available height without circular border -->
-            <img src="/static/logo.gif" alt="VigilSiddhi" onerror="this.onerror=null;this.src='https://placehold.co/80x80/63b3ed/ffffff?text=VigilSiddhi+Logo';">
+            <img src="/static/logo.gif" alt="VigilSiddhi">
         </div>
         <h1>Historical Alarms Overview</h1>
         <!-- Summary cards remain inside the header -->
@@ -415,6 +415,7 @@
                 <input list="types" type="text" id="type" placeholder="Search Type">
                 <datalist id="types"></datalist>
             </div>
+            <!-- Device IP filter removed -->
             <div class="filter-group">
                 <label for="group_name">Group Name</label>
                 <input list="group_names" type="text" id="group_name" placeholder="Search Group Name">
@@ -423,10 +424,6 @@
             <div class="filter-group">
                 <label for="message">Message</label>
                 <input type="text" id="message" placeholder="Search Message">
-            </div>
-            <div class="filter-group">
-                <label for="block_id">Block ID</label>
-                <input type="text" id="block_id" placeholder="C.0104, G.iloM etc.">
             </div>
         </div>
         <div class="action-buttons">
@@ -445,7 +442,6 @@
                 <th style="width: 150px;">Group Name</th>
                 <th style="width: 350px;">Message</th> <!-- Default larger width for message -->
                 <th style="width: 100px;">Severity</th>
-                <th style="width: 100px;">Block ID</th> <!-- NEW: Block ID Column -->
             </tr>
         </thead>
         <tbody></tbody>
@@ -523,34 +519,23 @@
         async function fetchData() {
             try {
                 const tbody = document.querySelector("#results tbody");
-                tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-gray-500">Loading alarms...</td></tr>'; // Increased colspan
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-500">Loading alarms...</td></tr>';
                 document.getElementById('pagination-controls').innerHTML = ''; // Clear pagination on load
 
-                const queryParams = new URLSearchParams(window.location.search);
-                const blockIdFromUrl = queryParams.get('block_id');
-                
-                const fetchBody = {};
-                if (blockIdFromUrl) {
-                    fetchBody.block_id = blockIdFromUrl;
-                    // Pre-fill the block ID filter if coming from a dashboard block click
-                    document.getElementById('block_id').value = blockIdFromUrl;
-                }
-
-                // Changed to call /api/get_alarms as per test_main.py's endpoint
                 const response = await fetch("/api/get_alarms", {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(fetchBody)
+                    body: JSON.stringify({})
                 });
 
                 const data = await response.json();
                 if (data.error) {
                     console.error("API Error:", data.error);
-                    showUserMessage(`❌ Failed to fetch data: ${data.error}. Check console for details.`);
+                    showUserMessage("❌ Failed to fetch data. Check console for details.");
                     return;
                 }
 
-                allData = data.hits; // The backend now returns { "hits": [...] }
+                allData = data.hits;
                 filteredData = allData; // Initially, filtered data is all data
                 currentPage = 1; // Reset to first page
                 renderSummaryCards(allData);
@@ -618,11 +603,11 @@
             document.getElementById('device_name').value = '';
             document.getElementById('severity').value = '';
             document.getElementById('type').value = '';
+            // document.getElementById('device_ip').value = ''; // Removed this filter
             document.getElementById('group_name').value = '';
             document.getElementById('message').value = '';
             document.getElementById('from_timestamp').value = '';
             document.getElementById('to_timestamp').value = '';
-            document.getElementById('block_id').value = ''; // Clear block ID filter
 
             // Set the severity filter and apply
             document.getElementById('severity').value = severityType;
@@ -637,9 +622,9 @@
                 device_name: document.getElementById('device_name').value.toLowerCase(),
                 severity: document.getElementById('severity').value.toLowerCase(),
                 type: document.getElementById('type').value.toLowerCase(),
+                // device_ip: document.getElementById('device_ip').value.toLowerCase(), // Removed this filter
                 group_name: document.getElementById('group_name').value.toLowerCase(),
                 message: document.getElementById('message').value.toLowerCase(),
-                block_id: document.getElementById('block_id').value.toLowerCase(), // NEW: Block ID filter
                 from_timestamp: document.getElementById('from_timestamp').value,
                 to_timestamp: document.getElementById('to_timestamp').value
             };
@@ -653,9 +638,9 @@
                 const matchesSeverity = (() => {
                     if (!filters.severity) return true; // No severity filter
                     const sev = (s.severity || '').toLowerCase();
-                    if (filters.severity === 'critical') return ["critical", "error", "fatal"].includes(sev); // Added fatal
+                    if (filters.severity === 'critical') return ["critical", "error"].includes(sev);
                     if (filters.severity === 'warning') return ["warning", "major", "minor"].includes(sev);
-                    if (filters.severity === 'info') return ["info", "ok", "normal"].includes(sev); // Added info, ok, normal
+                    if (filters.severity === 'info') return !(["critical", "error", "warning", "major", "minor"].includes(sev));
                     return sev.includes(filters.severity); // For direct text search
                 })();
 
@@ -664,9 +649,9 @@
                     (!filters.device_name || (s.device_name && s.device_name.toLowerCase().includes(filters.device_name))) &&
                     matchesSeverity &&
                     (!filters.type || (s.type && s.type.toLowerCase().includes(filters.type))) &&
+                    // (!filters.device_ip || (s.device_ip && s.device_ip.toLowerCase().includes(filters.device_ip))) && // Removed this filter
                     (!filters.group_name || (s.group_name && s.group_name.toLowerCase().includes(filters.group_name))) &&
                     (!filters.message || (s.message && s.message.toLowerCase().includes(filters.message))) &&
-                    (!filters.block_id || (s.frontend_block_id && s.frontend_block_id.toLowerCase().includes(filters.block_id)) || (s.block_id && s.block_id.toLowerCase().includes(filters.block_id))) && // NEW: Apply block_id filter, checking both
                     (!fromTime || timestamp >= fromTime) &&
                     (!toTime || timestamp <= toTime)
                 );
@@ -683,11 +668,11 @@
             document.getElementById('device_name').value = '';
             document.getElementById('severity').value = '';
             document.getElementById('type').value = '';
+            // document.getElementById('device_ip').value = ''; // Removed this filter
             document.getElementById('group_name').value = '';
             document.getElementById('message').value = '';
             document.getElementById('from_timestamp').value = '';
             document.getElementById('to_timestamp').value = '';
-            document.getElementById('block_id').value = ''; // Clear block ID filter
             filteredData = allData; // Reset filtered data to all data
             currentPage = 1;
             renderTable(filteredData);
@@ -702,6 +687,7 @@
                 device_names: new Set(),
                 severities: new Set(),
                 types: new Set(),
+                // device_ips: new Set(), // Removed this filter
                 group_names: new Set()
             };
 
@@ -710,6 +696,7 @@
                 if (s.device_name) sets.device_names.add(s.device_name);
                 if (s.severity) sets.severities.add(s.severity);
                 if (s.type) sets.types.add(s.type);
+                // if (s.device_ip) sets.device_ips.add(s.device_ip); // Removed this filter
                 if (s.group_name) sets.group_names.add(s.group_name);
             });
 
@@ -737,13 +724,13 @@
             const paginatedData = data.slice(startIndex, endIndex);
 
             if (paginatedData.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-gray-500">No alarms found matching your criteria.</td></tr>'; // Increased colspan
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-500">No alarms found matching your criteria.</td></tr>';
             } else {
                 tbody.innerHTML = paginatedData.map(hit => {
                     const s = hit._source;
                     const sev = (s.severity || '').toLowerCase();
                     let rowClass = 'severity-Info'; // Default to light blue for others
-                    if (["critical", "error", "fatal"].includes(sev)) { // Added fatal
+                    if (["critical", "error"].includes(sev)) {
                         rowClass = 'severity-Critical'; // Light red
                     } else if (["warning", "major", "minor"].includes(sev)) {
                         rowClass = 'severity-Warning'; // Light yellow
@@ -752,21 +739,15 @@
                     function safe(value) {
                         return value === null || value === undefined ? '' : value;
                     }
-                    
-                    // Use a more descriptive device name if available
-                    const deviceDisplayName = (s.channel_name && s.channel_name !== 'N/A' && s.device_name && s.device_name !== 'N/A')
-                                                ? `${safe(s.channel_name)} - ${safe(s.device_name)}`
-                                                : safe(s.device_name) || safe(s.device_ip) || 'N/A';
 
                     return `<tr class="${rowClass} hover:bg-gray-50 transition duration-150 ease-in-out">
                         <td data-label="Timestamp">${safe(new Date(s.timestamp).toLocaleString())}</td>
-                        <td data-label="Device Name">${deviceDisplayName}</td>
+                        <td data-label="Device Name">${safe(s.device_name)}</td>
                         <td data-label="Type">${safe(s.type)}</td>
                         <td data-label="Device IP">${safe(s.device_ip)}</td>
                         <td data-label="Group Name">${safe(s.group_name)}</td>
                         <td data-label="Message">${safe(s.message)}</td>
                         <td data-label="Severity">${safe(s.severity)}</td>
-                        <td data-label="Block ID">${safe(s.frontend_block_id || s.block_id)}</td> <!-- NEW: Block ID column -->
                     </tr>`;
                 }).join('');
             }
