@@ -935,23 +935,20 @@
 
         /**
          * Normalizes a channel ID part of a frontend_block_id string.
-         * It extracts the numeric part, pads it with a leading '0' if it's a single digit (1-9),
-         * and returns it as a string. Multi-digit numbers remain unchanged.
-         * This function handles cases like "C.104", "C.1004", "C.5004" where the channel number
-         * could have varying digits. It ensures that the channel ID portion is consistently formatted
-         * for lookup against the `pgmRoutingMap`.
-         * Examples: "1" -> "01", "9" -> "09", "10" -> "10", "100" -> "100".
-         * @param {string} idPart - The numeric part of the channel ID (e.g., "1", "10", "100", "50").
-         * @returns {string} The normalized channel ID string.
+         * It extracts the numeric part and pads it with a leading '0' if it's a single digit,
+         * ensuring a two-digit format for channels 1-9 (e.g., "01", "09").
+         * Multi-digit numbers (e.g., "10", "100") remain unchanged.
+         * @param {string} idPart - The numeric part of the channel ID (e.g., "1", "01", "10", "100").
+         * @returns {string} The normalized two-digit or multi-digit channel ID string.
          */
         function normalizeChannelIdPart(idPart) {
             const num = parseInt(idPart, 10);
             if (isNaN(num)) {
                 return idPart; // Return as is if not a valid number
             }
-            // For channels 1-9, add a leading zero. For 10 and above, keep as is.
-            // This ensures "1" -> "01", "9" -> "09", but "10" -> "10", "100" -> "100"
-            return num >= 1 && num <= 9 && idPart.length === 1 ? `0${num}` : `${num}`;
+            // Always return a string representation of the number, padded to two digits if it's a single digit.
+            // This ensures "1" -> "01", "01" -> "01", "10" -> "10", "100" -> "100".
+            return String(num).padStart(2, '0');
         }
 
 
@@ -996,10 +993,11 @@
                         
                         currentChannelNum = parseInt(channelNumRaw, 10); // Store raw channel number for PGM content logic
 
+                        // Normalize channel number for consistency in lookup keys (always "01", "10", etc.)
                         const normalizedChannelNum = normalizeChannelIdPart(channelNumRaw);
                         
                         let deviceBlueprint = null;
-                        // Find device blueprint using the exact deviceCode part (e.g., '04' or 'VS_M')
+                        // Find device blueprint using the exact deviceCode part (e.g., '04', '05')
                         if (!isNaN(parseInt(deviceCode))) { // If deviceCode is numeric (like '04', '05')
                             const effectiveDeviceCode = (parseInt(deviceCode)).toString().padStart(2, '0'); // Ensure '04' for lookup
                             deviceBlueprint = channelDevicesBlueprint.find(d => d.frontendBlockSuffix === effectiveDeviceCode);
@@ -1104,8 +1102,19 @@
         // Modified updatePgmBlockContent to use router_source and pgm_dest for display, and handle channel name
         function updatePgmBlockContent(element, message, pgmDestFromWS, polledValueFromWS, expectedValueFromWS, routerSourceFromWS, channelNum) {
             const blockId = element.dataset.frontendBlockId;
-            const pgmConfig = pgmRoutingMap.get(blockId) || {}; // Use the normalized blockId to get config
-            
+            // Attempt to get the PGM config using the element's normalized blockId
+            let pgmConfig = pgmRoutingMap.get(blockId);
+
+            // If not found, and it's a channel 1-9 block (C.0X format), try the non-padded alternative (C.X format)
+            if (!pgmConfig && blockId.startsWith('C.')) {
+                const matchPadded = blockId.match(/^C\.0(\d)([0-9A-Z_]+)$/); // Matches C.0104, C.0905
+                if (matchPadded && parseInt(matchPadded[1], 10) >= 1 && parseInt(matchPadded[1], 10) <= 9) {
+                    const alternativeId = `C.${parseInt(matchPadded[1], 10)}${matchPadded[2]}`; // e.g., C.104
+                    pgmConfig = pgmRoutingMap.get(alternativeId);
+                }
+            }
+            pgmConfig = pgmConfig || {}; // Ensure pgmConfig is an object even if not found
+
             // Channel name for PGM blocks should now directly come from pgmConfig.channel_name
             const channelNameFromPgmConfig = pgmConfig.channel_name || `Channel ${String(channelNum).padStart(2, '0')}`;
 
@@ -1286,17 +1295,31 @@
                 pgmRoutingMap.clear();
                 (data.pgm_configs || []).forEach(config => {
                     if (config.frontend_block_id) {
-                        // Normalize frontend_block_id from DB before storing in map
+                        // Always store the exact frontend_block_id from the database
+                        // This handles cases where the DB might store C.104 directly
+                        pgmRoutingMap.set(config.frontend_block_id, config); 
+
+                        // Also try to store its "alternative" form if it's a channel 1-9 block,
+                        // to ensure lookups using the other format will also find it.
                         const match = config.frontend_block_id.match(/^C\.(\d+)([0-9A-Z_]+)$/);
                         if (match) {
-                            const channelNumRaw = match[1];
+                            const channelNum = parseInt(match[1], 10);
                             const deviceSuffix = match[2];
-                            const normalizedId = `C.${normalizeChannelIdPart(channelNumRaw)}${deviceSuffix}`;
-                            pgmRoutingMap.set(normalizedId, config);
+
+                            if (channelNum >= 1 && channelNum <= 9) {
+                                let alternativeId = null;
+                                if (match[1].length === 1) { // Original was C.X format (e.g., C.104)
+                                    alternativeId = `C.0${channelNum}${deviceSuffix}`; // Alternative is C.0X format (C.0104)
+                                } else if (match[1].length === 2 && match[1].startsWith('0')) { // Original was C.0X format (e.0104)
+                                    alternativeId = `C.${channelNum}${deviceSuffix}`; // Alternative is C.X format (C.104)
+                                }
+
+                                if (alternativeId && !pgmRoutingMap.has(alternativeId)) {
+                                    pgmRoutingMap.set(alternativeId, config); // Store the alternative if not already present
+                                }
+                            }
                         } else {
-                            // If the format is unexpected, store as is, but log a warning
                             console.warn(`PGM Config frontend_block_id format unexpected: ${config.frontend_block_id}`);
-                            pgmRoutingMap.set(config.frontend_block_id, config);
                         }
                     }
                 });
@@ -1348,8 +1371,18 @@
 
                             if (device.isPgm) {
                                 // For PGM blocks, use fetched PGM routing data for initial display
-                                // Use the normalized dynamicFrontendBlockId for lookup in pgmRoutingMap
-                                const pgmConfig = pgmRoutingMap.get(dynamicFrontendBlockId);
+                                // Try to get the PGM config using the normalized blockId first
+                                let pgmConfig = pgmRoutingMap.get(dynamicFrontendBlockId);
+                                
+                                // If not found, and it's a channel 1-9 block (C.0X format), try the non-padded alternative (C.X format)
+                                if (!pgmConfig && dynamicFrontendBlockId.startsWith('C.')) {
+                                    const matchPadded = dynamicFrontendBlockId.match(/^C\.0(\d)([0-9A-Z_]+)$/); // Matches C.0104, C.0905
+                                    if (matchPadded && parseInt(matchPadded[1], 10) >= 1 && parseInt(matchPadded[1], 10) <= 9) {
+                                        const alternativeId = `C.${parseInt(matchPadded[1], 10)}${matchPadded[2]}`; // e.g., C.104
+                                        pgmConfig = pgmRoutingMap.get(alternativeId);
+                                    }
+                                }
+
                                 if (pgmConfig) {
                                     // Top row: router_source - pgm_dest from DB
                                     // Bottom row: channel_name from DB (from pgmRoutingMap for this specific PGM block)
@@ -1357,7 +1390,7 @@
                                                    <div class="text-xs">${pgmConfig.channel_name || 'Channel N/A'}</div>`; // Use pgmConfig.channel_name
                                 } else {
                                     // Fallback if no PGM config found for this block ID
-                                    console.log(`PGM config not found for blockId: ${dynamicFrontendBlockId}. Displaying default content.`);
+                                    console.log(`PGM config not found for blockId: ${dynamicFrontendBlockId} (or its alternative). Displaying default content.`);
                                     displayText = `<div class="text-xs font-bold">${device.name}</div><div class="text-xs">Config Missing</div>`;
                                 }
                             } else {
@@ -1678,7 +1711,17 @@
                             );
                         } else {
                             // Alarm is not PGM mismatch, or it's OK/INFO status for a PGM block, revert to config display
-                            const pgmConfig = pgmRoutingMap.get(idToMatch);
+                            let pgmConfig = pgmRoutingMap.get(idToMatch);
+                            // If not found, and it's a channel 1-9 block (C.0X format), try the non-padded alternative (C.X format)
+                            if (!pgmConfig && idToMatch.startsWith('C.')) {
+                                const matchPadded = idToMatch.match(/^C\.0(\d)([0-9A-Z_]+)$/); // Matches C.0104, C.0905
+                                if (matchPadded && parseInt(matchPadded[1], 10) >= 1 && parseInt(matchPadded[1], 10) <= 9) {
+                                    const alternativeId = `C.${parseInt(matchPadded[1], 10)}${matchPadded[2]}`; // e.g., C.104
+                                    pgmConfig = pgmRoutingMap.get(alternativeId);
+                                }
+                            }
+                            pgmConfig = pgmConfig || {}; // Ensure pgmConfig is an object even if not found
+
                             element.innerHTML = `<div class="text-xs font-bold">${pgmConfig?.router_source || 'Router N/A'} - ${pgmConfig?.pgm_dest || 'Dest N/A'}</div>
                                                 <div class="text-xs">${pgmConfig?.channel_name || 'Channel N/A'}</div>`; // Use pgmConfig.channel_name
                         }
@@ -1688,7 +1731,17 @@
                     updateStatusBlockFromWS(element, 'OK', 'OK');
                     
                     if (isPgmBlock) {
-                        const pgmConfig = pgmRoutingMap.get(idToMatch);
+                        let pgmConfig = pgmRoutingMap.get(idToMatch);
+                        // If not found, and it's a channel 1-9 block (C.0X format), try the non-padded alternative (C.X format)
+                        if (!pgmConfig && idToMatch.startsWith('C.')) {
+                            const matchPadded = idToMatch.match(/^C\.0(\d)([0-9A-Z_]+)$/); // Matches C.0104, C.0905
+                            if (matchPadded && parseInt(matchPadded[1], 10) >= 1 && parseInt(matchPadded[1], 10) <= 9) {
+                                const alternativeId = `C.${parseInt(matchPadded[1], 10)}${matchPadded[2]}`; // e.g., C.104
+                                pgmConfig = pgmRoutingMap.get(alternativeId);
+                            }
+                        }
+                        pgmConfig = pgmConfig || {}; // Ensure pgmConfig is an object even if not found
+
                         element.innerHTML = `<div class="text-xs font-bold">${pgmConfig?.router_source || 'Router N/A'} - ${pgmConfig?.pgm_dest || 'Dest N/A'}</div>
                                             <div class="text-xs">${pgmConfig?.channel_name || 'Channel N/A'}</div>`; // Use pgmConfig.channel_name
                     } else if (deviceBlueprint) {
