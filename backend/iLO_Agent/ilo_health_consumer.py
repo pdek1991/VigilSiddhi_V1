@@ -41,6 +41,12 @@ es = Elasticsearch(f"http://{ES_HOST}:{ES_PORT}")
 # Async HTTP session for WebSocket notifier communication
 http_session = None
 
+# --- Local state management for frontend block alarms ---
+# This dictionary will store the last known status and details for each frontend_block_id
+# to prevent sending redundant notifications and to detect alarm clearing.
+# Format: { "frontend_block_id": {"status": "OK", "severity": "INFO", "message": "..."} }
+last_known_states = {}
+
 async def send_websocket_notification(message_data):
     """Sends a JSON message to the WebSocket notifier's HTTP endpoint."""
     global http_session
@@ -53,7 +59,7 @@ async def send_websocket_notification(message_data):
             if response.status != 200:
                 logging.error(f"Failed to send WebSocket notification: {response.status} - {await response.text()}")
             else:
-                logging.info(f"WebSocket notification sent successfully for {message_data.get('ip')}.")
+                logging.info(f"WebSocket notification sent successfully for {message_data.get('frontend_block_id')} (IP: {message_data.get('ip')}).")
     except aiohttp.ClientConnectionError as e:
         logging.error(f"WebSocket notifier connection error: {e}. Is the notifier running?")
     except Exception as e:
@@ -75,26 +81,38 @@ def setup_consumer_group():
             logging.error(f"Unhandled error during consumer group setup for {stream_name}: {e}", exc_info=True)
 
 async def process_message(stream_name, message_id, payload):
-    """Processes a single message from the Redis stream, indexes to ES, and sends WS notifications."""
+    """Processes a single message from the Redis stream, indexes to ES, and sends WS notifications based on state changes."""
     logging.info(f"Processing message ID: {message_id.decode()} from stream: {stream_name}")
     
     device_ip = payload.get('device_ip')
     device_name = payload.get('device_name')
-    frontend_block_id = payload.get('frontend_block_id')
-    overall_status = payload.get('status')
-    overall_severity = payload.get('severity')
+    frontend_block_id = payload.get('frontend_block_id') # Extract frontend_block_id
+    overall_status = payload.get('status').upper() # Ensure status is uppercase for consistent comparison
+    overall_severity = payload.get('severity').upper() # Ensure severity is uppercase
     overall_message = payload.get('message')
     timestamp = payload.get('timestamp')
     agent_type = payload.get('agent_type')
-    group_name = payload.get('group_name') # Retrieve the new group_name
+    group_name = payload.get('group_name') # Retrieve the group_name
 
-    logging.info(f"  Device IP: {device_ip}, Status: {overall_status}, Severity: {overall_severity}, Group: {group_name}")
+    logging.info(f"  Device IP: {device_ip}, Status: {overall_status}, Severity: {overall_severity}, Group: {group_name}, Frontend Block ID: {frontend_block_id}")
+
+    # Retrieve the last known state for this frontend_block_id
+    # Default to an 'OK' state if not seen before.
+    last_state = last_known_states.get(frontend_block_id, {
+        "status": "OK",
+        "severity": "INFO",
+        "message": ""
+    })
+
+    # Determine if the new status constitutes an alarm (not 'OK')
+    current_is_alarm = overall_status in ["ALARM", "ERROR", "WARNING"]
+    last_was_alarm = last_state["status"] in ["ALARM", "ERROR", "WARNING"]
 
     # --- Index to monitor_historical_alarms ---
-    # Only index to Elasticsearch if the status is NOT 'OK'
-    if overall_status != 'OK':
+    # Only index to Elasticsearch if the status is an alarm (NOT 'OK')
+    if current_is_alarm:
         component_health = payload.get('details', {}).get('component_health', {})
-        iml_alarms = payload.get('details', {}).get('iml_alarms', []) # This will be empty, as IML was removed from API client
+        iml_alarms = payload.get('details', {}).get('iml_alarms', [])
         api_errors = payload.get('details', {}).get('api_errors', [])
 
         # Create a base alarm document
@@ -103,42 +121,103 @@ async def process_message(stream_name, message_id, payload):
             "timestamp": timestamp,
             "device_name": device_name,
             "block_id": frontend_block_id, # Use frontend_block_id as the device ID
-            "severity": overall_severity.upper(),
-            "status": overall_status.upper(),
+            "severity": overall_severity,
+            "status": overall_status,
             "type": agent_type,
             "device_ip": device_ip,
             "group_name": group_name, # Include the group_name in ES document
             "message": overall_message,
             "details": {
                 "component_health": component_health,
-                "iml_alarms": iml_alarms, # Will be empty
+                "iml_alarms": iml_alarms,
                 "api_errors": api_errors
             }
         }
         
         try:
             es.index(index="monitor_historical_alarms", document=alarm_doc)
-            logging.info(f"Indexed iLO health alarm '{alarm_doc['alarm_id']}' for {device_ip} (Group: {group_name}) to Elasticsearch.")
+            logging.info(f"Indexed iLO health alarm '{alarm_doc['alarm_id']}' for {frontend_block_id} (Group: {group_name}) to Elasticsearch.")
         except Exception as e:
-            logging.error(f"Failed to index iLO health alarm to Elasticsearch for {device_ip}: {e}", exc_info=True)
+            logging.error(f"Failed to index iLO health alarm to Elasticsearch for {frontend_block_id}: {e}", exc_info=True)
     else:
-        logging.info(f"Skipping Elasticsearch indexing for {device_ip} as status is 'OK'.")
+        logging.info(f"Skipping Elasticsearch indexing for {frontend_block_id} as status is 'OK'.")
 
 
-    # --- WebSocket Notification ---
-    # Only send notifications for alarm or error/warning statuses
-    if overall_status in ["ALARM", "ERROR", "WARNING"]:
+    # --- WebSocket Notification Logic ---
+    websocket_message = None
+
+    # Determine group_id based on group_name for WebSocket notification
+    group_id = None
+    if group_name == "VERSIO M":
+        group_id = "G.iloM"
+    elif group_name == "VERSIO P":
+        group_id = "G.iloP"
+    elif group_name == "VERSIO B":
+        group_id = "G.iloB"
+    elif group_name == "Compression M":
+        group_id = "G.COMPRESSION_M"
+    elif group_name == "Compression B":
+        group_id = "G.COMPRESSION_B"
+
+    # Scenario 1: Transition from OK to Alarm state
+    if current_is_alarm and not last_was_alarm:
+        logging.info(f"New alarm detected for {frontend_block_id}: {overall_status} - {overall_message}")
         websocket_message = {
             "device_name": device_name,
             "ip": device_ip,
             "time": timestamp,
             "message": overall_message,
             "severity": overall_severity,
-            "group_name": group_name # Include the group_name in WebSocket notification
+            "group_name": group_name,
+            "frontend_block_id": frontend_block_id,
+            "group_id": group_id
         }
-        await send_websocket_notification(websocket_message)
+    # Scenario 2: Ongoing alarm state, check if message or severity changed
+    elif current_is_alarm and last_was_alarm:
+        if (overall_status != last_state["status"] or
+            overall_severity != last_state["severity"] or
+            overall_message != last_state["message"]):
+            
+            logging.info(f"Alarm details changed for {frontend_block_id}. Sending update: {overall_status} - {overall_message}")
+            websocket_message = {
+                "device_name": device_name,
+                "ip": device_ip,
+                "time": timestamp,
+                "message": overall_message,
+                "severity": overall_severity,
+                "group_name": group_name,
+                "frontend_block_id": frontend_block_id,
+                "group_id": group_id
+            }
+        else:
+            logging.info(f"Alarm for {frontend_block_id} is ongoing with no change. Skipping WebSocket notification.")
+    # Scenario 3: Transition from Alarm state to OK
+    elif not current_is_alarm and last_was_alarm:
+        logging.info(f"Alarm cleared for {frontend_block_id}. Sending 'OK cleared' notification.")
+        websocket_message = {
+            "device_name": device_name,
+            "ip": device_ip,
+            "time": timestamp,
+            "message": f"iLO health for {device_name} ({device_ip}) is OK. All previous alarms cleared.",
+            "severity": "INFO", # Always INFO for cleared messages
+            "group_name": group_name,
+            "frontend_block_id": frontend_block_id,
+            "group_id": group_id
+        }
+    # Scenario 4: Already OK and remains OK (do nothing, no notification needed)
     else:
-        logging.info(f"Skipping WebSocket notification for {device_ip} as status is '{overall_status}'.")
+        logging.info(f"Status for {frontend_block_id} is OK and was already OK. Skipping WebSocket notification.")
+
+    # Send the WebSocket message if it was prepared
+    if websocket_message:
+        await send_websocket_notification(websocket_message)
+    
+    # Update the last known state for this frontend_block_id
+    last_known_states[frontend_block_id] = {
+        "status": overall_status,
+        "severity": overall_severity,
+        "message": overall_message
+    }
 
 
 async def consume_messages():
@@ -196,3 +275,4 @@ if __name__ == "__main__":
     finally:
         if http_session:
             asyncio.run(http_session.close())
+

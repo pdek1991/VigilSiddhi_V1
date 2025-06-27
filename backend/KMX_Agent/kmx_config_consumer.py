@@ -96,7 +96,7 @@ async def process_message(message_id, payload):
                 alarm_doc = {
                     "alarm_id": str(uuid.uuid4()), # Generate a unique ID for each alarm instance
                     "timestamp": payload.get('timestamp'),
-                    "message": f"KMX Alarm - Device: {alarm_data.get('deviceName', 'N/A')}, Value: {alarm_data.get('actualValue', 'N/A')}, OID: {alarm_data.get('oid', 'N/A')}",
+                    "message": f"KMX Alarm - Device: {alarm_data.get('deviceName', 'N/A')}, Value: {alarm_data.get('actualValue', 'N/A')}",
                     "device_name": payload.get('device_name'), # Overall device name from agent payload
                     "block_id": payload.get('frontend_block_id'),
                     "severity": alarm_data.get('severity', 'UNKNOWN').upper(), # Use the alarm's specific severity

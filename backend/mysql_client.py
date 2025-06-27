@@ -3,7 +3,7 @@ from mysql.connector import Error
 import logging
 from datetime import datetime
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s') # Changed to DEBUG
 
 class MySQLManager:
     """
@@ -19,7 +19,12 @@ class MySQLManager:
 
     def _connect(self):
         """Establishes a connection to the MySQL database."""
+        if self.connection and self.connection.is_connected():
+            logging.debug("MySQL connection is already active. Skipping reconnect.")
+            return
+
         try:
+            logging.debug("Attempting to connect to MySQL...")
             self.connection = mysql.connector.connect(
                 host=self.host,
                 database=self.database,
@@ -29,28 +34,44 @@ class MySQLManager:
             if self.connection.is_connected():
                 db_info = self.connection.get_server_info()
                 logging.info(f"Successfully connected to MySQL Database... Server version: {db_info}")
+            else:
+                logging.error("MySQL connection attempt succeeded, but connection is not reported as active.")
+                self.connection = None
         except Error as e:
             logging.error(f"Error while connecting to MySQL: {e}")
             self.connection = None # Ensure connection is None on failure
+        except Exception as e:
+            logging.error(f"Unexpected error during MySQL connection attempt: {e}", exc_info=True)
+            self.connection = None
 
     def _get_cursor(self):
         """Returns a cursor, attempting to reconnect if the connection is lost."""
         if not self.connection or not self.connection.is_connected():
-            logging.warning("MySQL connection lost. Attempting to reconnect...")
-            self._connect()
+            logging.warning("MySQL connection lost or not established. Attempting to reconnect...")
+            self._connect() # Attempt to reconnect
+        
         if self.connection and self.connection.is_connected():
-            return self.connection.cursor(dictionary=True) # Return dictionaries for easier access
+            try:
+                # Always create a new cursor for each operation to avoid stale cursors
+                return self.connection.cursor(dictionary=True) # Return dictionaries for easier access
+            except Error as e:
+                logging.error(f"Error creating MySQL cursor: {e}")
+                return None
         else:
-            logging.error("Failed to establish MySQL connection. Cannot get cursor.")
+            logging.error("Failed to establish or reconnect MySQL connection. Cannot get cursor.")
             return None
 
     def close(self):
         """Closes the MySQL database connection."""
         if self.connection and self.connection.is_connected():
-            self.connection.close()
-            logging.info("MySQL connection closed.")
+            try:
+                self.connection.close()
+                logging.info("MySQL connection closed.")
+            except Error as e:
+                logging.error(f"Error closing MySQL connection: {e}")
+            self.connection = None
 
-    def _execute_query(self, query, params=None, fetch_one=False, fetch_all=False, commit=False):
+    def _execute_query(self, query, params=None, fetch_one=False, fetch_all=False, commit=bool(False)):
         """
         Executes a SQL query.
         :param query: The SQL query string.
@@ -62,28 +83,42 @@ class MySQLManager:
         """
         cursor = self._get_cursor()
         if not cursor:
-            return None
+            logging.error(f"Failed to get cursor for query: {query}")
+            return None if (fetch_one or fetch_all) else False
 
         try:
+            logging.debug(f"Executing query: {query} with params: {params}")
             cursor.execute(query, params or ())
+            
             if commit:
                 self.connection.commit()
                 logging.debug("Query committed.")
                 return True
             if fetch_one:
-                return cursor.fetchone()
+                result = cursor.fetchone()
+                logging.debug(f"Fetched one result: {result}")
+                return result
             if fetch_all:
-                return cursor.fetchall()
+                result = cursor.fetchall()
+                logging.debug(f"Fetched all results ({len(result) if result else 0} rows).")
+                return result
             return True # For DML operations that don't fetch
         except Error as e:
-            logging.error(f"Error executing query: {e}. Query: {query}, Params: {params}")
+            logging.error(f"Error executing query: {e}. Query: '{query}', Params: {params}", exc_info=True)
             if commit:
                 self.connection.rollback()
                 logging.warning("Transaction rolled back due to error.")
-            return False
+            return None if (fetch_one or fetch_all) else False
+        except Exception as e:
+            logging.error(f"Unexpected error during query execution: {e}. Query: '{query}', Params: {params}", exc_info=True)
+            return None if (fetch_one or fetch_all) else False
         finally:
             if cursor:
-                cursor.close()
+                try:
+                    cursor.close()
+                    logging.debug("Cursor closed.")
+                except Error as e:
+                    logging.error(f"Error closing cursor: {e}")
 
     # --- CRUD operations for global_configs ---
     def add_global_config(self, config_id, global_block_name, ip_address=None, username=None, password=None, device_name=None):
@@ -105,10 +140,6 @@ class MySQLManager:
         return self._execute_query(query, params, commit=True)
 
     def delete_global_config(self, config_id):
-        # NOTE: With device_ips no longer having owner_type/owner_id, cascade deletion
-        # from global_configs to specific device_ips is not automatic here.
-        # Application logic needs to handle deleting associated device_ips if they map
-        # semantically to this global config ID (e.g., frontend_block_id starting with G.ID).
         query = "DELETE FROM global_configs WHERE id = %s"
         return self._execute_query(query, (config_id,), commit=True)
 
@@ -132,10 +163,6 @@ class MySQLManager:
         return self._execute_query(query, params, commit=True)
 
     def delete_channel_config(self, channel_id):
-        # NOTE: With device_ips no longer having owner_type/owner_id, cascade deletion
-        # from channel_configs to specific device_ips is not automatic here.
-        # Application logic needs to handle deleting associated device_ips if they map
-        # semantically to this channel ID (e.g., frontend_block_id starting with C.CHANNEL_ID).
         query = "DELETE FROM channel_configs WHERE id = %s"
         return self._execute_query(query, (channel_id,), commit=True)
 
@@ -341,3 +368,4 @@ class MySQLManager:
     def delete_playoutmv_config(self, config_id):
         query = "DELETE FROM playoutmv_configs WHERE id = %s"
         return self._execute_query(query, (config_id,), commit=True)
+

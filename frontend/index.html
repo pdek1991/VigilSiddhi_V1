@@ -75,7 +75,7 @@
             top: 100%; /* Position below the header */
             left: 0;
             background-color: #2d3748; /* bg-gray-800 */
-            border-radius: 0.5rem; /* rounded-lg */
+            border-radius: 0.5rem;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
             z-index: 1000;
             min-width: 150px;
@@ -389,9 +389,6 @@
             .alarm-console-table td {
                 padding: 0.5rem;
                 font-size: 0.75rem;
-            }
-            .iframe-view-container iframe {
-                height: 100%; /* Further adjust iframe height for smaller screens */
             }
             .open-alarm-console-button {
                 top: 0.5rem;
@@ -790,13 +787,13 @@
 
     <script>
         // Define the number of channels
-        const NUM_CHANNELS = 50;
+        const NUM_CHANNELS = 52; // Changed from 50 to 52
         const WS_URL = "ws://127.0.0.1:8000"; // WebSocket Notifier URL
         let ws; // WebSocket instance
 
         // Severity order for color mapping (higher value means higher severity)
         const SEVERITY_ORDER = {
-            'INFO': 0, 'OK': 0, 'NORMAL': 0,
+            'INFO': 0, 'OK': 0, 'NORMAL': 0, 'CLEARED': 0, // MODIFICATION: Added 'CLEARED'
             'WARNING': 1, 'MINOR': 1,
             'ALARM': 2, 'MAJOR': 2,
             'ERROR': 3, 'CRITICAL': 3, 'FATAL': 3,
@@ -804,7 +801,7 @@
         };
 
         const SEVERITY_COLOR_CLASSES = {
-            'OK': 'status-ok', 'INFO': 'status-ok', 'NORMAL': 'status-ok',
+            'OK': 'status-ok', 'INFO': 'status-ok', 'NORMAL': 'status-ok', 'CLEARED': 'status-ok', // MODIFICATION: Added 'CLEARED'
             'WARNING': 'status-warning', 'MINOR': 'status-warning',
             'ALARM': 'status-alarm', 'MAJOR': 'status-alarm',
             'ERROR': 'status-alarm', 'CRITICAL': 'status-alarm', 'FATAL': 'status-alarm',
@@ -848,7 +845,7 @@
         let currentBlockStatus = new Map();
 
         // Global map to store active alarms for the console
-        // key: unique alarm identifier (e.g., device_ip-message-severity)
+        // key: unique alarm identifier (e.g., device_ip-message-severity-frontend_block_id-oid)
         // value: latest alarm object
         let activeAlarms = new Map();
         let alarmConsoleUpdateTimer = null;
@@ -918,6 +915,11 @@
             ws.onmessage = (event) => {
                 const message = JSON.parse(event.data);
                 console.log("WebSocket message received:", message);
+
+                // ADDED FOR DEBUGGING:
+                console.log('Value of message.frontend_block_id after parsing:', message.frontend_block_id);
+                console.log('Value of message.group_id after parsing:', message.group_id); // Log group_id as well
+
                 processWebSocketMessage(message);
             };
 
@@ -932,25 +934,6 @@
                 ws.close(); // Close to trigger onclose and retry
             };
         }
-
-        /**
-         * Normalizes a channel ID part of a frontend_block_id string.
-         * It extracts the numeric part and pads it with a leading '0' if it's a single digit,
-         * ensuring a two-digit format for channels 1-9 (e.g., "01", "09").
-         * Multi-digit numbers (e.g., "10", "100") remain unchanged.
-         * @param {string} idPart - The numeric part of the channel ID (e.g., "1", "01", "10", "100").
-         * @returns {string} The normalized two-digit or multi-digit channel ID string.
-         */
-        function normalizeChannelIdPart(idPart) {
-            const num = parseInt(idPart, 10);
-            if (isNaN(num)) {
-                return idPart; // Return as is if not a valid number
-            }
-            // Always return a string representation of the number, padded to two digits if it's a single digit.
-            // This ensures "1" -> "01", "01" -> "01", "10" -> "10", "100" -> "100".
-            return String(num).padStart(2, '0');
-        }
-
 
         /**
          * Helper function to get the standardized frontendBlockSuffix from the blueprint based on device ID.
@@ -974,115 +957,141 @@
             return ''; // Should not happen if all blueprints are complete
         }
 
+        // NEW: Function to normalize frontend_block_id for consistent use
+        // Takes incoming "C.104" or "C.0104" and converts it to C.0104 format.
+        function normalizeFrontendBlockId(blockId) {
+            if (!blockId || !blockId.startsWith('C.')) {
+                return blockId; // Return as is for global blocks or invalid format
+            }
+
+            // Regex to capture the numeric parts.
+            // It tries to find the channel number (any digits after C.) and the last two digits as the device suffix.
+            // C.104 -> channelNum="1", deviceSuffix="04"
+            // C.0204 -> channelNum="02", deviceSuffix="04"
+            // C.5204 -> channelNum="52", deviceSuffix="04"
+            const match = blockId.match(/^C\.(\d+)(\d{2})$/); 
+            if (match) {
+                let channelNum = parseInt(match[1], 10); // e.g., 1 or 02 or 52
+                let deviceSuffix = match[2]; // e.g., 04 or 05
+
+                // Pad channel number to two digits (e.g., 1 -> 01)
+                const paddedChannelNum = String(channelNum).padStart(2, '0');
+                return `C.${paddedChannelNum}${deviceSuffix}`;
+            }
+            return blockId; // If it doesn't match the expected pattern, return original
+        }
+
         function processWebSocketMessage(message) {
-            // Added router_source, polled_value, expected_value, dest_name to destructuring
-            const { frontend_block_id, group_name, status, severity, message: msgText, pgm_dest, polled_value, expected_value, router_source } = message; 
+            const { frontend_block_id, group_name, group_id, status, severity, message: msgText, pgm_dest, polled_value, expected_value, router_source, oid } = message; 
 
-            let targetId = null;
-            let currentChannelNum = null; // For PGM blocks to get channel_name
+            // Determine the target ID for the HTML element and the normalized ID for alarm storage
+            let targetIdForElement = null; 
+            let normalizedIdForAlarmStorage = null;
 
-            if (frontend_block_id) {
-                // Determine if it's a channel block or global block
-                if (frontend_block_id.startsWith('C.')) {
-                    // Channel block ID format: C.<channel_id><device_code>
-                    // Extract channel number and device ID from frontend_block_id
-                    const match = frontend_block_id.match(/^C\.(\d+)([A-Z_]+|\d+)$/); // Allows device_code to be digits or text
-                    if (match) {
-                        const channelNumRaw = match[1]; // e.g., "1", "10", "100"
-                        const deviceCode = match[2]; // e.g., "04", "VS_M"
-                        
-                        currentChannelNum = parseInt(channelNumRaw, 10); // Store raw channel number for PGM content logic
-
-                        // Normalize channel number for consistency in lookup keys (always "01", "10", etc.)
-                        const normalizedChannelNum = normalizeChannelIdPart(channelNumRaw);
-                        
-                        let deviceBlueprint = null;
-                        // Find device blueprint using the exact deviceCode part (e.g., '04', '05')
-                        if (!isNaN(parseInt(deviceCode))) { // If deviceCode is numeric (like '04', '05')
-                            const effectiveDeviceCode = (parseInt(deviceCode)).toString().padStart(2, '0'); // Ensure '04' for lookup
-                            deviceBlueprint = channelDevicesBlueprint.find(d => d.frontendBlockSuffix === effectiveDeviceCode);
-                        } else { // Assume it's directly the ID from blueprint (e.g., VS_M)
-                            deviceBlueprint = channelDevicesBlueprint.find(d => d.id === deviceCode);
-                        }
-
-                        if (deviceBlueprint) {
-                            // Reconstruct targetId using normalized channel number and blueprint suffix
-                            targetId = `C.${normalizedChannelNum}${frontendBlockSuffixForId(deviceBlueprint.id)}`;
-                        } else {
-                            console.warn(`Could not find device blueprint for frontend_block_id: ${frontend_block_id}`);
-                        }
-
-                    } else {
-                        console.warn(`Invalid channel frontend_block_id format from WS: ${frontend_block_id}`);
-                    }
-                } else { // Global block
-                    targetId = `global-${frontend_block_id}`; // Global blocks have a fixed prefix
-                }
+            if (frontend_block_id && frontend_block_id.startsWith('C.')) {
+                // Channel block
+                targetIdForElement = normalizeFrontendBlockId(frontend_block_id);
+                normalizedIdForAlarmStorage = targetIdForElement;
+            } else if (group_id && group_id.startsWith('G.')) {
+                // Global block, use group_id from message if present and starts with 'G.'
+                targetIdForElement = group_id; 
+                normalizedIdForAlarmStorage = group_id;
+            } else if (frontend_block_id && frontend_block_id.startsWith('G.')) {
+                 // Fallback if group_id is not set but frontend_block_id is a global block
+                 targetIdForElement = frontend_block_id;
+                 normalizedIdForAlarmStorage = frontend_block_id;
             } else if (group_name) {
-                // If only group_name is present, map it to the corresponding global block ID
+                // Fallback for older messages or if group_id/frontend_block_id are not global
+                // Try to find the global block based on group_name
                 const globalBlock = globalGroupStatusBlocks.find(block => block.name === group_name);
                 if (globalBlock) {
-                    targetId = `global-${globalBlock.id}`;
+                    targetIdForElement = globalBlock.id;
+                    normalizedIdForAlarmStorage = globalBlock.id;
                 } else {
                     console.warn(`Could not find global block for group_name: ${group_name}`);
                 }
             }
 
-            if (targetId) {
-                const element = document.getElementById(targetId);
+
+            console.log(`Processing WS message. Original frontend_block_id: '${frontend_block_id}'. Original group_id: '${group_id}'. Target HTML ID: '${targetIdForElement}'. Normalized for storage: '${normalizedIdForAlarmStorage}'.`);
+
+            if (targetIdForElement) {
+                const element = document.getElementById(targetIdForElement);
                 if (element) {
+                    // Update status for the found element
                     updateStatusBlockFromWS(element, status, severity);
 
-                    // Special handling for PGM blocks (C.XX04, C.XX05 etc.)
-                    // Check if the target element's dataset identifies it as a PGM block
-                    const isPgmBlockElement = element.dataset.isPgm === 'true';
-
+                    const deviceBlueprint = channelDevicesBlueprint.find(d => element.dataset.deviceId === d.id);
+                    const isPgmBlockElement = deviceBlueprint && deviceBlueprint.isPgm;
+                    
                     if (isPgmBlockElement) {
-                        // Pass all relevant PGM fields to the update function
-                        updatePgmBlockContent(element, msgText, pgm_dest, polled_value, expected_value, router_source, currentChannelNum); 
+                         // Extract the raw channel number from the normalized ID for PGM block content updates
+                        const channelNumMatch = normalizedIdForAlarmStorage.match(/^C\.(\d{2})(\d{2})$/);
+                        const rawChannelNum = channelNumMatch ? parseInt(channelNumMatch[1], 10) : null;
+
+                        updatePgmBlockContent(element, msgText, pgm_dest, polled_value, expected_value, router_source, rawChannelNum); 
                     }
                 } else {
-                    console.warn(`Target element with ID ${targetId} not found for WS update.`);
+                    console.warn(`Target HTML element with ID ${targetIdForElement} not found for WS update.`);
                 }
             }
             
-            // Manage the Alarm Console at the bottom of the dashboard
-            // Clear all alarms on 'OK' or 'INFO' status
-            if (SEVERITY_ORDER[severity.toUpperCase()] <= SEVERITY_ORDER['OK']) {
-                activeAlarms.clear(); // Clear all alarms
-                triggerImmediateAlarmConsoleUpdate(); // Re-render to show empty state
+            // --- Alarm Console Management ---
+            const currentSeverityRank = SEVERITY_ORDER[severity.toUpperCase()];
+
+            // A unique key for each *alarm instance* for deduplication in activeAlarms map.
+            // Use group_id or frontend_block_id based on what's available and normalized, plus other unique identifiers.
+            const uniqueAlarmKey = `${message.ip || message.server_ip || 'N/A'}-` +
+                                   `${msgText || 'No message'}-` +
+                                   `${severity}-` +
+                                   `${normalizedIdForAlarmStorage || 'N/A'}-` +
+                                   `${oid || 'N/A'}`; // Include OID for KMX/IRD specific alarms if present
+
+            if (currentSeverityRank <= SEVERITY_ORDER['OK']) { // This now correctly handles 'OK', 'INFO', 'NORMAL', 'CLEARED'
+                // If the message indicates OK/INFO/CLEARED status, remove this specific alarm from activeAlarms
+                // We should aim to clear individual alarms if they have a unique key.
+                // If the message represents an overall block status (like iLO overall OK),
+                // it should clear all alarms *associated with that block*.
+
+                // For a 'CLEARED' or 'OK' message, we assume it means the specific problem identified by
+                // the uniqueAlarmKey (or potentially all alarms for a block ID if the clearing message is general)
+                // has been resolved.
+                if (activeAlarms.has(uniqueAlarmKey)) {
+                    activeAlarms.delete(uniqueAlarmKey);
+                    console.log(`Cleared specific alarm: ${uniqueAlarmKey}. Remaining alarms: ${activeAlarms.size}`);
+                } else {
+                    // If a general 'OK' or 'CLEARED' message for a block,
+                    // and no specific alarm key matched, clear all alarms related to that block ID.
+                    const keysToRemove = [];
+                    activeAlarms.forEach((alarm, key) => {
+                        if (alarm.frontend_block_id === normalizedIdForAlarmStorage || alarm.group_id === normalizedIdForAlarmStorage) {
+                            keysToRemove.push(key);
+                        }
+                    });
+                    keysToRemove.forEach(key => activeAlarms.delete(key));
+                    console.log(`Cleared all alarms for block ${normalizedIdForAlarmStorage}. Remaining alarms: ${activeAlarms.size}`);
+                }
             } else {
-                // Add the new alarm if it's not OK
+                // If it's an alarm (WARNING, ALARM, ERROR, CRITICAL), add/update it in the activeAlarms map
                 const alarmEntry = {
                     device_name: message.device_name || message.group_name || 'N/A',
-                    server_ip: message.device_ip || message.ip || 'N/A', // Use 'ip' if 'device_ip' is not present
+                    server_ip: message.device_ip || message.ip || 'N/A',
                     message: msgText || 'No message provided',
                     severity: severity || 'UNKNOWN',
-                    timestamp: message.timestamp || message.time || new Date().toISOString(), // Use 'time' if 'timestamp' is not present
-                    frontend_block_id: frontend_block_id, // Add block ID for potential filtering
+                    timestamp: message.timestamp || message.time || new Date().toISOString(),
+                    frontend_block_id: normalizedIdForAlarmStorage, // Use the normalized ID for storage
+                    group_id: group_id, // Store group_id from message
                     type: message.agent_type || 'websocket',
-                    // NEW: Store PGM specific values in the active alarms map for consistent updates
                     pgm_dest: pgm_dest,
                     polled_value: polled_value,
                     expected_value: expected_value,
-                    router_source: router_source // This is the source_name from consumer
+                    router_source: router_source,
+                    oid: oid // Store OID if present
                 };
-                // Normalize frontend_block_id in alarmEntry before storing in activeAlarms map
-                if (alarmEntry.frontend_block_id && alarmEntry.frontend_block_id.startsWith('C.')) {
-                    const match = alarmEntry.frontend_block_id.match(/^C\.(\d+)([0-9A-Z_]+)$/);
-                    if (match) {
-                        const channelNumRaw = match[1];
-                        const deviceSuffix = match[2];
-                        alarmEntry.frontend_block_id = `C.${normalizeChannelIdPart(channelNumRaw)}${deviceSuffix}`;
-                    }
-                }
-
-                // Use a more robust key for deduplication to prevent duplicate alarms for the same issue
-                const alarmKey = `${alarmEntry.server_ip}-${alarmEntry.message}-${alarmEntry.severity}-${alarmEntry.frontend_block_id}`;
-                
-                activeAlarms.set(alarmKey, alarmEntry); // Always set to ensure latest status
-                triggerImmediateAlarmConsoleUpdate(); // Debounced update
+                activeAlarms.set(uniqueAlarmKey, alarmEntry);
+                console.log(`Added/Updated alarm for ${normalizedIdForAlarmStorage}. Total alarms: ${activeAlarms.size}`);
             }
+            triggerImmediateAlarmConsoleUpdate(); // Always trigger update after processing
         }
 
         function updateStatusBlockFromWS(element, status, severity) {
@@ -1101,22 +1110,16 @@
         
         // Modified updatePgmBlockContent to use router_source and pgm_dest for display, and handle channel name
         function updatePgmBlockContent(element, message, pgmDestFromWS, polledValueFromWS, expectedValueFromWS, routerSourceFromWS, channelNum) {
-            const blockId = element.dataset.frontendBlockId;
-            // Attempt to get the PGM config using the element's normalized blockId
+            const blockId = element.dataset.frontendBlockId; // This is the HTML element's ID (e.g., C.0104)
             let pgmConfig = pgmRoutingMap.get(blockId);
 
-            // If not found, and it's a channel 1-9 block (C.0X format), try the non-padded alternative (C.X format)
-            if (!pgmConfig && blockId.startsWith('C.')) {
-                const matchPadded = blockId.match(/^C\.0(\d)([0-9A-Z_]+)$/); // Matches C.0104, C.0905
-                if (matchPadded && parseInt(matchPadded[1], 10) >= 1 && parseInt(matchPadded[1], 10) <= 9) {
-                    const alternativeId = `C.${parseInt(matchPadded[1], 10)}${matchPadded[2]}`; // e.g., C.104
-                    pgmConfig = pgmRoutingMap.get(alternativeId);
-                }
-            }
             pgmConfig = pgmConfig || {}; // Ensure pgmConfig is an object even if not found
 
-            // Channel name for PGM blocks should now directly come from pgmConfig.channel_name
-            const channelNameFromPgmConfig = pgmConfig.channel_name || `Channel ${String(channelNum).padStart(2, '0')}`;
+            // Channel name for PGM blocks: Use channelNum passed or fallback
+            // `channelNum` here should be the raw integer from the incoming message for better accuracy
+            const displayChannelNum = channelNum !== null ? String(channelNum).padStart(2, '0') : 'N/A';
+            const channelNameFromPgmConfig = pgmConfig.channel_name || `Channel ${displayChannelNum}`;
+
 
             let firstRowText = '';
             let secondRowText = '';
@@ -1179,19 +1182,19 @@
                 
                 // Clear existing alarms and populate from backend
                 activeAlarms.clear();
-                // Access 'alarms' array directly as per main.py's response structure
-                (data.alarms || []).forEach(alarm => {
-                    // Normalize frontend_block_id from alarm before storing
-                    if (alarm.frontend_block_id && alarm.frontend_block_id.startsWith('C.')) {
-                        const match = alarm.frontend_block_id.match(/^C\.(\d+)([0-9A-Z_]+)$/);
-                        if (match) {
-                            const channelNumRaw = match[1];
-                            const deviceSuffix = match[2];
-                            alarm.frontend_block_id = `C.${normalizeChannelIdPart(channelNumRaw)}${deviceSuffix}`;
-                        }
-                    }
+                // Access 'hits' array and then '_source' as per main.py's response structure
+                (data.hits || []).forEach(hit => {
+                    const alarm = hit._source;
+                    // MODIFICATION: Normalize frontend_block_id from alarm before storing
+                    alarm.frontend_block_id = normalizeFrontendBlockId(alarm.frontend_block_id);
+
                     // Ensure backend alarms also have a unique key for deduplication
-                    const alarmKey = `${alarm.server_ip}-${alarm.message}-${alarm.severity}-${alarm.frontend_block_id || ''}`;
+                    // Use a more robust key to uniquely identify the alarm, considering OID if available
+                    const alarmKey = `${alarm.device_ip || alarm.ip}-` + 
+                                     `${alarm.message}-` + 
+                                     `${alarm.severity}-` + 
+                                     `${alarm.frontend_block_id || ''}-` +
+                                     `${alarm.oid || ''}`; // Include OID for uniqueness if it's there
                     activeAlarms.set(alarmKey, alarm);
                 });
                 console.log(`Fetched ${activeAlarms.size} active alarms from backend.`);
@@ -1247,15 +1250,8 @@
         function openFullAlarmConsole(blockId) {
             let url = '/alarm_console_fullscreen';
             if (blockId) {
-                // Normalize the blockId before passing to the full console
-                if (blockId.startsWith('C.')) {
-                    const match = blockId.match(/^C\.(\d+)([0-9A-Z_]+)$/);
-                    if (match) {
-                        const channelNumRaw = match[1];
-                        const deviceSuffix = match[2];
-                        blockId = `C.${normalizeChannelIdPart(channelNumRaw)}${deviceSuffix}`;
-                    }
-                }
+                // MODIFICATION: Normalize the blockId before passing to the full console
+                blockId = normalizeFrontendBlockId(blockId);
                 url += `?block_id=${blockId}`;
             }
             window.open(url, '_blank');
@@ -1274,8 +1270,8 @@
                 const data = await response.json();
                 channelNamesMap.clear();
                 (data.channels || []).forEach(channel => {
-                    // Ensure the key in channelNamesMap is also normalized (e.g., "01", "10", "100")
-                    channelNamesMap.set(normalizeChannelIdPart(channel.id.toString()), channel.channel_name);
+                    // Ensure the key in channelNamesMap is always padded (e.g., "01", "10", "100")
+                    channelNamesMap.set(String(channel.id).padStart(2, '0'), channel.channel_name);
                 });
                 console.log("Channel names loaded:", channelNamesMap);
             } catch (error) {
@@ -1295,32 +1291,9 @@
                 pgmRoutingMap.clear();
                 (data.pgm_configs || []).forEach(config => {
                     if (config.frontend_block_id) {
-                        // Always store the exact frontend_block_id from the database
-                        // This handles cases where the DB might store C.104 directly
-                        pgmRoutingMap.set(config.frontend_block_id, config); 
-
-                        // Also try to store its "alternative" form if it's a channel 1-9 block,
-                        // to ensure lookups using the other format will also find it.
-                        const match = config.frontend_block_id.match(/^C\.(\d+)([0-9A-Z_]+)$/);
-                        if (match) {
-                            const channelNum = parseInt(match[1], 10);
-                            const deviceSuffix = match[2];
-
-                            if (channelNum >= 1 && channelNum <= 9) {
-                                let alternativeId = null;
-                                if (match[1].length === 1) { // Original was C.X format (e.g., C.104)
-                                    alternativeId = `C.0${channelNum}${deviceSuffix}`; // Alternative is C.0X format (C.0104)
-                                } else if (match[1].length === 2 && match[1].startsWith('0')) { // Original was C.0X format (e.0104)
-                                    alternativeId = `C.${channelNum}${deviceSuffix}`; // Alternative is C.X format (C.104)
-                                }
-
-                                if (alternativeId && !pgmRoutingMap.has(alternativeId)) {
-                                    pgmRoutingMap.set(alternativeId, config); // Store the alternative if not already present
-                                }
-                            }
-                        } else {
-                            console.warn(`PGM Config frontend_block_id format unexpected: ${config.frontend_block_id}`);
-                        }
+                        // MODIFICATION: Normalize frontend_block_id before storing in pgmRoutingMap
+                        const normalizedId = normalizeFrontendBlockId(config.frontend_block_id);
+                        pgmRoutingMap.set(normalizedId, config);
                     }
                 });
                 console.log("PGM Routing configurations loaded:", pgmRoutingMap);
@@ -1338,8 +1311,9 @@
 
             for (let i = 1; i <= NUM_CHANNELS; i++) {
                 const channelIdNum = i; // Use the numerical ID for lookup
-                // This 'channelNameForHeading' now correctly uses the normalized channel ID for lookup
-                const channelNameForHeading = channelNamesMap.get(normalizeChannelIdPart(String(i))) || `Channel ${String(i).padStart(2, '0')}`;
+                // Get channel name from map, then prefix with channel number
+                const channelNameFromMap = channelNamesMap.get(String(i).padStart(2, '0')) || `Channel ${String(i).padStart(2, '0')}`;
+                const channelNameForHeading = `${i} - ${channelNameFromMap}`; // Prefix with channel number
 
                 const channelBlock = document.createElement('div');
                 channelBlock.id = `channel-${channelIdNum}`; // ID based on numerical channel ID
@@ -1361,41 +1335,28 @@
                         const device = deviceMap.get(area);
                         if (device) {
                             let displayText = '';
-                            let dynamicFrontendBlockId = '';
-
-                            // Construct frontend_block_id based on pattern (C.channelid + device_specific_id)
-                            let frontendBlockSuffix = frontendBlockSuffixForId(device.id);
-
-                            // Use normalizeChannelIdPart when generating the ID for the HTML element
-                            dynamicFrontendBlockId = `C.${normalizeChannelIdPart(String(channelIdNum))}${frontendBlockSuffix}`;
+                            // HTML element IDs are consistently padded (e.g., C.0104)
+                            const dynamicFrontendBlockId = `C.${String(channelIdNum).padStart(2, '0')}${frontendBlockSuffixForId(device.id)}`;
 
                             if (device.isPgm) {
-                                // For PGM blocks, use fetched PGM routing data for initial display
-                                // Try to get the PGM config using the normalized blockId first
+                                // For PGM blocks, try to get config using the padded ID
                                 let pgmConfig = pgmRoutingMap.get(dynamicFrontendBlockId);
                                 
-                                // If not found, and it's a channel 1-9 block (C.0X format), try the non-padded alternative (C.X format)
-                                if (!pgmConfig && dynamicFrontendBlockId.startsWith('C.')) {
-                                    const matchPadded = dynamicFrontendBlockId.match(/^C\.0(\d)([0-9A-Z_]+)$/); // Matches C.0104, C.0905
-                                    if (matchPadded && parseInt(matchPadded[1], 10) >= 1 && parseInt(matchPadded[1], 10) <= 9) {
-                                        const alternativeId = `C.${parseInt(matchPadded[1], 10)}${matchPadded[2]}`; // e.g., C.104
-                                        pgmConfig = pgmRoutingMap.get(alternativeId);
-                                    }
-                                }
+                                pgmConfig = pgmConfig || {}; // Ensure pgmConfig is an object even if not found
+
+                                // Use channelNum for fallback display, ensuring it's not null/undefined
+                                const displayChannelNum = String(channelIdNum).padStart(2, '0');
 
                                 if (pgmConfig) {
-                                    // Top row: router_source - pgm_dest from DB
-                                    // Bottom row: channel_name from DB (from pgmRoutingMap for this specific PGM block)
                                     displayText = `<div class="text-xs font-bold">${pgmConfig.router_source || 'Router N/A'} - ${pgmConfig.pgm_dest || 'Dest N/A'}</div>
-                                                   <div class="text-xs">${pgmConfig.channel_name || 'Channel N/A'}</div>`; // Use pgmConfig.channel_name
+                                                   <div class="text-xs">${pgmConfig.channel_name || `Channel ${displayChannelNum}`}</div>`;
                                 } else {
-                                    // Fallback if no PGM config found for this block ID
-                                    console.log(`PGM config not found for blockId: ${dynamicFrontendBlockId} (or its alternative). Displaying default content.`);
+                                    console.log(`PGM config not found for blockId: ${dynamicFrontendBlockId}. Displaying default content.`);
                                     displayText = `<div class="text-xs font-bold">${device.name}</div><div class="text-xs">Config Missing</div>`;
                                 }
                             } else {
                                 // For non-PGM blocks, use the default name
-                                displayText = `<div>${device.name}</div>`; // Ensure other blocks also have content within a div for consistent styling
+                                displayText = `<div>${device.name}</div>`;
                             }
 
                             channelDevicesHtml += `
@@ -1430,7 +1391,7 @@
 
             globalGroupStatusBlocks.forEach(groupBlock => {
                 const blockDiv = document.createElement('div');
-                blockDiv.id = `global-${groupBlock.id}`; // Matches the ID used in globalGroupStatusBlocks
+                blockDiv.id = groupBlock.id; // Corrected: ID should be G.iloM directly for global blocks
                 blockDiv.className = 'global-status-block status-unknown'; // Default to unknown initially
                 blockDiv.setAttribute('data-group-id', groupBlock.id); // Add data attribute for easier lookup
                 blockDiv.setAttribute('data-frontend-block-id', groupBlock.id); // Also set frontend_block_id for global blocks
@@ -1643,7 +1604,7 @@
             loadGlobalConfigs();
 
             if (deletedConfig) {
-                const removedDivId = `global-${deletedConfig.globalGroupName.replace(/\s+/g, '_').toUpperCase()}`; // Consistent ID generation
+                const removedDivId = `G.${deletedConfig.globalGroupName.replace(/\s+/g, '_').toUpperCase()}`; // Consistent ID generation
                 const elementToRemove = document.getElementById(removedDivId);
                 if (elementToRemove) {
                     elementToRemove.remove();
@@ -1672,26 +1633,28 @@
             
             // Re-render blocks based on fetched active alarms
             document.querySelectorAll('.device-status[data-frontend-block-id], .global-status-block[data-frontend-block-id]').forEach(element => {
-                let idToMatch = element.getAttribute('data-frontend-block-id');
+                // MODIFICATION: Normalize the element's data-frontend-block-id before lookup
+                let idToMatch = normalizeFrontendBlockId(element.getAttribute('data-frontend-block-id')); 
+                
                 let highestSeverityForBlock = 'OK'; // Default to OK
                 let latestAlarmForBlock = null;
 
                 // Find the highest severity alarm for this specific block from the fetched activeAlarms map
+                // Alarms in activeAlarms are already normalized (e.g., C.0104)
                 activeAlarms.forEach(alarm => {
-                    if (alarm.frontend_block_id === idToMatch) {
+                    // Check both frontend_block_id (for channel blocks) and group_id (for global blocks)
+                    if (alarm.frontend_block_id === idToMatch || alarm.group_id === idToMatch) { 
                         if (!latestAlarmForBlock || SEVERITY_ORDER[alarm.severity.toUpperCase()] > SEVERITY_ORDER[latestAlarmForBlock.severity.toUpperCase()]) {
                             latestAlarmForBlock = alarm; // Keep the highest severity alarm
                         }
                     }
                 });
+                console.log(`Checking block ${idToMatch}. Found alarm:`, latestAlarmForBlock ? `ID: ${latestAlarmForBlock.frontend_block_id || latestAlarmForBlock.group_id}, Severity: ${latestAlarmForBlock.severity}` : 'None');
 
                 const deviceId = element.dataset.deviceId;
                 const deviceBlueprint = channelDevicesBlueprint.find(d => d.id === deviceId);
                 const isPgmBlock = deviceBlueprint && deviceBlueprint.isPgm;
-                const channelNum = element.dataset.channelNum;
-                // For the main channel name, still use the channelNamesMap
-                const channelNameForHeading = channelNamesMap.get(normalizeChannelIdPart(String(channelNum))) || `Channel ${String(channelNum).padStart(2, '0')}`;
-
+                const channelNum = parseInt(element.dataset.channelNum, 10); // Get as number
 
                 if (latestAlarmForBlock) {
                     highestSeverityForBlock = latestAlarmForBlock.severity;
@@ -1706,24 +1669,16 @@
                                 latestAlarmForBlock.pgm_dest,
                                 latestAlarmForBlock.polled_value,
                                 latestAlarmForBlock.expected_value,
-                                latestAlarmForBlock.router_source, // This is the source_name from consumer
-                                channelNum
+                                latestAlarmForBlock.router_source,
+                                channelNum // Pass raw channel number
                             );
                         } else {
                             // Alarm is not PGM mismatch, or it's OK/INFO status for a PGM block, revert to config display
-                            let pgmConfig = pgmRoutingMap.get(idToMatch);
-                            // If not found, and it's a channel 1-9 block (C.0X format), try the non-padded alternative (C.X format)
-                            if (!pgmConfig && idToMatch.startsWith('C.')) {
-                                const matchPadded = idToMatch.match(/^C\.0(\d)([0-9A-Z_]+)$/); // Matches C.0104, C.0905
-                                if (matchPadded && parseInt(matchPadded[1], 10) >= 1 && parseInt(matchPadded[1], 10) <= 9) {
-                                    const alternativeId = `C.${parseInt(matchPadded[1], 10)}${matchPadded[2]}`; // e.g., C.104
-                                    pgmConfig = pgmRoutingMap.get(alternativeId);
-                                }
-                            }
+                            let pgmConfig = pgmRoutingMap.get(idToMatch); // Use normalized ID here
                             pgmConfig = pgmConfig || {}; // Ensure pgmConfig is an object even if not found
 
                             element.innerHTML = `<div class="text-xs font-bold">${pgmConfig?.router_source || 'Router N/A'} - ${pgmConfig?.pgm_dest || 'Dest N/A'}</div>
-                                                <div class="text-xs">${pgmConfig?.channel_name || 'Channel N/A'}</div>`; // Use pgmConfig.channel_name
+                                                <div class="text-xs">${pgmConfig?.channel_name || `Channel ${String(channelNum).padStart(2, '0')}`}</div>`;
                         }
                     }
                 } else {
@@ -1731,19 +1686,11 @@
                     updateStatusBlockFromWS(element, 'OK', 'OK');
                     
                     if (isPgmBlock) {
-                        let pgmConfig = pgmRoutingMap.get(idToMatch);
-                        // If not found, and it's a channel 1-9 block (C.0X format), try the non-padded alternative (C.X format)
-                        if (!pgmConfig && idToMatch.startsWith('C.')) {
-                            const matchPadded = idToMatch.match(/^C\.0(\d)([0-9A-Z_]+)$/); // Matches C.0104, C.0905
-                            if (matchPadded && parseInt(matchPadded[1], 10) >= 1 && parseInt(matchPadded[1], 10) <= 9) {
-                                const alternativeId = `C.${parseInt(matchPadded[1], 10)}${matchPadded[2]}`; // e.g., C.104
-                                pgmConfig = pgmRoutingMap.get(alternativeId);
-                            }
-                        }
+                        let pgmConfig = pgmRoutingMap.get(idToMatch); // Use normalized ID here
                         pgmConfig = pgmConfig || {}; // Ensure pgmConfig is an object even if not found
 
                         element.innerHTML = `<div class="text-xs font-bold">${pgmConfig?.router_source || 'Router N/A'} - ${pgmConfig?.pgm_dest || 'Dest N/A'}</div>
-                                            <div class="text-xs">${pgmConfig?.channel_name || 'Channel N/A'}</div>`; // Use pgmConfig.channel_name
+                                            <div class="text-xs">${pgmConfig?.channel_name || `Channel ${String(channelNum).padStart(2, '0')}`}</div>`;
                     } else if (deviceBlueprint) {
                         element.innerHTML = `<div>${deviceBlueprint.name}</div>`;
                     }

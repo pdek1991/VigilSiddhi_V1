@@ -35,7 +35,7 @@ REDIS_STREAM_MAP = {
     "Compression B": "vs:agent:enc_iloB_status", # New stream for Compression B
     "DEFAULT": "vs:agent:ilo_status" # For devices not explicitly mapped by device_name or group_name
 }
-POLLING_INTERVAL_SECONDS = 300 # Poll iLO configs every 5 minutes
+POLLING_INTERVAL_SECONDS = 30 # Poll iLO configs every 5 minutes
 
 # Initialize Redis and MySQL clients outside main
 r = None

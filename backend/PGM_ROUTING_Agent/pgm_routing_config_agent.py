@@ -14,7 +14,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__))))
 from mysql_client import MySQLManager
 from pgm_routing_api_client import pgm_routing_api_client # Import the new client
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s') # Changed to DEBUG
 
 # --- Configuration ---
 MYSQL_HOST = os.environ.get('MYSQL_HOST', '192.168.56.30')
@@ -26,46 +26,54 @@ REDIS_HOST = os.environ.get('REDIS_HOST', '192.168.56.30')
 REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
 
 REDIS_STREAM_NAME = "vs:agent:pgm_routing_status" # New Redis stream name
-POLLING_INTERVAL_SECONDS = 300 # Poll PGM routing configs every 5 minutes
+POLLING_INTERVAL_SECONDS = 30 # Poll PGM routing configs every 5 minutes
 
 # IPs for main and backup domains
 MAIN_DOMAIN_IP = "172.19.185.81"
 BACKUP_DOMAIN_IP = "172.19.220.51"
 SNMP_COMMUNITY_STRING = os.environ.get('SNMP_COMMUNITY_STRING', 'public') # Assuming a common community string
 
-# Initialize Redis and MySQL clients
+# Initialize Redis and MySQL clients globally, but establish connections within main_agent
 r = None
 mysql_manager = None
 
-try:
-    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=False)
-    r.ping()
-    logging.info("Successfully connected to Redis.")
-except redis.exceptions.ConnectionError as e:
-    logging.critical(f"FATAL: Failed to connect to Redis at {REDIS_HOST}:{REDIS_PORT}. Error: {e}")
-    sys.exit(1)
-except Exception as e:
-    logging.critical(f"FATAL: Unexpected error during Redis connection test: {e}", exc_info=True)
-    sys.exit(1)
+async def initialize_clients():
+    """Initializes and tests connections for Redis and MySQL."""
+    global r, mysql_manager
+    try:
+        r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=False)
+        r.ping()
+        logging.info("Successfully connected to Redis.")
+    except redis.exceptions.ConnectionError as e:
+        logging.critical(f"FATAL: Failed to connect to Redis at {REDIS_HOST}:{REDIS_PORT}. Error: {e}")
+        # Optionally sys.exit(1) here if Redis is absolutely critical at startup
+    except Exception as e:
+        logging.critical(f"FATAL: Unexpected error during Redis connection test: {e}", exc_info=True)
+        # Optionally sys.exit(1) here
 
-try:
-    mysql_manager = MySQLManager(
-        host=MYSQL_HOST,
-        database=MYSQL_DATABASE,
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD
-    )
-    if not mysql_manager.connection or not mysql_manager.connection.is_connected():
-        logging.critical(f"FATAL: MySQLManager initialized but connection is not active.")
-        sys.exit(1)
-    logging.info("Successfully initialized MySQLManager and connected to database.")
-except Exception as e:
-    logging.critical(f"FATAL: Failed to initialize MySQLManager: {e}.", exc_info=True)
-    sys.exit(1)
+    try:
+        mysql_manager = MySQLManager(
+            host=MYSQL_HOST,
+            database=MYSQL_DATABASE,
+            user=MYSQL_USER,
+            password=MYSQL_PASSWORD
+        )
+        # The MySQLManager's __init__ calls _connect(), so we check connection status directly.
+        if not mysql_manager.connection or not mysql_manager.connection.is_connected():
+            logging.critical(f"FATAL: MySQLManager initialized but connection is not active after initial connect.")
+            # Optionally sys.exit(1) here if MySQL is absolutely critical at startup
+        logging.info("Successfully initialized MySQLManager and connected to database.")
+    except Exception as e:
+        logging.critical(f"FATAL: Failed to initialize MySQLManager: {e}.", exc_info=True)
+        # Optionally sys.exit(1) here
 
 
 def publish_status_to_redis(payload):
     """Publishes a status message to the Redis Stream."""
+    if r is None or not r.ping(): # Check if Redis connection is still alive
+        logging.error("Redis connection is not active. Cannot publish message.")
+        return
+
     try:
         r.xadd(REDIS_STREAM_NAME, {"data": json.dumps(payload).encode('utf-8')})
         logging.info(f"Published to {REDIS_STREAM_NAME}: {payload.get('frontend_block_id', payload.get('device_ip'))} - {payload.get('status')}")
@@ -79,10 +87,15 @@ async def fetch_and_publish_pgm_routing_configs():
     and publishes the status of each route to Redis.
     """
     logging.info("Starting PGM Routing Config Agent cycle.")
+    
+    if mysql_manager is None:
+        logging.error("MySQLManager is not initialized. Cannot fetch PGM routing configurations.")
+        return
+
     pgm_routing_configs = mysql_manager.get_pgm_routing_configs()
     
-    if pgm_routing_configs is None:
-        logging.error("Received None for PGM routing configurations from MySQLManager. Assuming database error or no data.")
+    if pgm_routing_configs is None: # get_pgm_routing_configs can return None on connection error
+        logging.error("Received None for PGM routing configurations from MySQLManager. This likely indicates a database query or connection error. Skipping this cycle.")
         return
     
     if not pgm_routing_configs:
@@ -90,6 +103,9 @@ async def fetch_and_publish_pgm_routing_configs():
         return
 
     logging.info(f"Found {len(pgm_routing_configs)} PGM routing configurations to process.")
+    # Log a sample of the fetched data to verify its content and freshness
+    for i, config in enumerate(pgm_routing_configs[:5]): # Log first 5 configs
+        logging.debug(f"Fetched config sample {i+1}: {json.dumps(config, indent=2)}") # Pretty print JSON
 
     processing_tasks = []
     for config in pgm_routing_configs:
@@ -113,6 +129,7 @@ async def process_single_pgm_routing_config(config):
 
     if not pgm_dest or router_source is None or not frontend_block_id or not channel_name or not domain:
         logging.warning(f"Skipping PGM routing config due to missing required data: {config}")
+        # Consider publishing an error for malformed configs if needed
         return
 
     # Normalize domain value for IP selection
@@ -175,30 +192,36 @@ async def process_single_pgm_routing_config(config):
         logging.error(f"Error fetching PGM routing SNMP data for {pgm_dest} (IP: {ip_to_poll}): {e}", exc_info=True)
         api_errors.append(f"Unhandled error during SNMP data fetch: {e}")
 
-    # Construct Redis payload for this specific PGM destination
+    # Determine the status, severity, and message for the Redis payload
     payload_status = "ok"
     payload_severity = "INFO"
     payload_message = f"PGM Routing {pgm_dest} is OK."
     
     if routing_check_result:
-        payload_status = routing_check_result.get("status", "error").lower() # e.g., "ok", "mismatch", "error"
+        # Prioritize status from routing_check_result
+        payload_status = routing_check_result.get("status", "error").lower() 
         payload_message = routing_check_result.get("message", "Unknown status.")
         
         if payload_status == "mismatch":
             payload_severity = "CRITICAL"
-        elif payload_status == "error":
+        elif payload_status == "error": # SNMP error during check
             payload_severity = "ERROR"
-        else:
-            payload_severity = "INFO" # For "ok" status
+        elif payload_status == "ok":
+            payload_severity = "INFO"
+        else: # Fallback for unexpected statuses from check_pgm_routing_status
+            payload_severity = "UNKNOWN"
+            logging.warning(f"Unexpected status '{payload_status}' from SNMP check for {pgm_dest}. Defaulting to UNKNOWN severity.")
 
-    elif api_errors: # If routing_check_result is None but api_errors exist
+    elif api_errors: # If routing_check_result is None but api_errors exist (e.g., Aiohttp connection error)
         payload_status = "error"
         payload_severity = "ERROR"
         payload_message = f"API communication error for PGM Dest {pgm_dest} (IP: {ip_to_poll}): " + "; ".join(api_errors)
-    else: # Should not happen if result is None and no API errors, but as fallback
+    else: 
+        # This block might be hit if no routing_check_result and no api_errors,
+        # which implies a problem, so default to unknown.
         payload_status = "unknown"
         payload_severity = "WARNING"
-        payload_message = f"Failed to get PGM routing status for {pgm_dest} (IP: {ip_to_poll})."
+        payload_message = f"Failed to get PGM routing status for {pgm_dest} (IP: {ip_to_poll}). No specific error details."
 
 
     redis_payload = {
@@ -217,15 +240,33 @@ async def process_single_pgm_routing_config(config):
         }
     }
     publish_status_to_redis(redis_payload)
-    logging.debug(f"DEBUG: Finished processing single PGM routing config for Dest: {pgm_dest}, IP: {ip_to_poll}")
+    logging.debug(f"Finished processing single PGM routing config for Dest: {pgm_dest}, IP: {ip_to_poll}")
 
 
 async def main_agent():
+    # Initialize clients once at the beginning of the main agent loop
+    await initialize_clients()
+    
+    # Ensure clients are initialized before proceeding
+    if r is None or mysql_manager is None or not mysql_manager.connection.is_connected():
+        logging.critical("FATAL: Essential clients (Redis/MySQL) not initialized or connected. Exiting.")
+        sys.exit(1)
+
     logging.info("PGM Routing Config Agent starting main polling loop.")
-    while True:
-        await fetch_and_publish_pgm_routing_configs()
-        logging.info(f"PGM Routing Config Agent sleeping for {POLLING_INTERVAL_SECONDS} seconds...")
-        await asyncio.sleep(POLLING_INTERVAL_SECONDS)
+    try:
+        while True:
+            await fetch_and_publish_pgm_routing_configs()
+            logging.info(f"PGM Routing Config Agent sleeping for {POLLING_INTERVAL_SECONDS} seconds...")
+            await asyncio.sleep(POLLING_INTERVAL_SECONDS)
+    except asyncio.CancelledError:
+        logging.info("PGM Routing Config Agent polling loop cancelled.")
+    except Exception as e:
+        logging.critical(f"PGM Routing Config Agent polling loop terminated due to an unhandled error: {e}", exc_info=True)
+    finally:
+        if mysql_manager:
+            mysql_manager.close()
+        logging.info("PGM Routing Config Agent has stopped.")
+
 
 if __name__ == "__main__":
     if sys.platform.startswith('win'):
