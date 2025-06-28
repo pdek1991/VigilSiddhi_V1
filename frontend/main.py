@@ -10,9 +10,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # Adjust path to import from the backend directory
 # Assuming project_root is the directory containing both 'frontend' and 'backend'
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# And main.py is inside the 'frontend' directory
+current_file_dir = os.path.dirname(__file__)
+project_root = os.path.abspath(os.path.join(current_file_dir, '..')) # Go up one level from 'frontend'
+
 sys.path.append(os.path.join(project_root, 'backend'))
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))) # Add project root itself for other potential imports
+sys.path.append(project_root) # Add project root itself for other potential imports
 
 # Import your backend classes
 from elastic_client import ElasticManager
@@ -22,23 +25,18 @@ from backend.mysql_client import MySQLManager
 # from ird_overview_monitor import D9800IRDOverview # Uncomment if needed
 # from windows_monitor import WindowsMonitor # Uncomment if needed
 
-# Define the absolute path to the Media folder for static files
-media_folder_path = os.path.abspath(os.path.join(project_root, 'Media'))
-# Define the absolute path to the templates folder
-templates_folder_path = os.path.abspath(os.path.join(os.path.dirname(__file__))) # Templates are in the same directory as main.py
-
-# --- DEBUGGING PATHS ---
-logging.info(f"DEBUG: Resolved project_root: {project_root}")
-logging.info(f"DEBUG: Resolved media_folder_path: {media_folder_path}")
-logging.info(f"DEBUG: Resolved templates_folder_path: {templates_folder_path}")
-
-app = Flask(
-    __name__,
-    static_folder=media_folder_path, # Serve static files (like logo.png) from 'Media'
-    static_url_path='/media', # URL path to access static files (e.g., /media/logo.png)
-    template_folder=templates_folder_path # Serve HTML templates from 'frontend/templates'
-)
+# --- Flask App Initialization ---
+# By default, Flask looks for templates in a 'templates' folder and static files in a 'static' folder
+# relative to the application's root (which is where main.py resides in this structure).
+app = Flask(__name__)
 CORS(app) # Enable CORS for all routes
+
+# --- DEBUGGING PATHS (for verification, can be removed in production) ---
+logging.info(f"DEBUG: Flask app instance created. Name: {__name__}")
+logging.info(f"DEBUG: Flask template_folder (default): {app.template_folder}")
+logging.info(f"DEBUG: Flask static_folder (default): {app.static_folder}")
+logging.info(f"DEBUG: Flask static_url_path (default): {app.static_url_path}")
+
 
 # --- Elasticsearch Manager Initialization ---
 ES_HOST = os.environ.get('ES_HOST', '192.168.56.30')
@@ -83,16 +81,21 @@ except Exception as e:
 @app.route('/')
 def index():
     """Serves the main dashboard page."""
+    # Flask will look for 'index.html' inside the 'templates' folder.
     return render_template('index.html')
 
 @app.route('/alarm_console_fullscreen')
 def alarm_console_fullscreen():
     """Serves the full-screen alarm console page."""
-    return render_template('alarm_console_fullscreen.html')
+    # Flask will look for 'alarm_console_fullscreen.html' inside the 'templates' folder.
+    # You can pass query parameters to the template if needed
+    block_id = request.args.get('block_id')
+    return render_template('alarm_console_fullscreen.html', block_id=block_id)
 
 @app.route('/ird_overview')
 def ird_overview():
     """Serves the IRD overview dashboard page."""
+    # Flask will look for 'ird_overview.html' inside the 'templates' folder.
     return render_template('ird_overview.html')
 
 
@@ -258,13 +261,7 @@ def get_alarm_history():
         return jsonify({"status": "error", "message": f"Error fetching alarm history: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    # Ensure 'static' and 'templates' folders exist if they are expected by Flask
-    # In this setup, we assume 'main.py' is in the 'frontend' directory,
-    # and templates are also in 'frontend' and static is in 'Media'
-    
-    # You might need to adjust static_folder and template_folder in Flask app initialization
-    # if your directory structure is different.
-    # For example, if 'static' and 'templates' are direct subdirectories of 'main.py's parent:
-    # app = Flask(__name__, static_folder='../static', template_folder='../templates')
-    
+    # Flask will now automatically look for 'templates/' and 'static/' relative to main.py
+    # Ensure your project structure matches this expectation.
     app.run(debug=True, host='0.0.0.0', port=5000)
+

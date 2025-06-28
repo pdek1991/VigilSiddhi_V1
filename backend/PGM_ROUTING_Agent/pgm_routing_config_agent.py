@@ -26,7 +26,7 @@ REDIS_HOST = os.environ.get('REDIS_HOST', '192.168.56.30')
 REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
 
 REDIS_STREAM_NAME = "vs:agent:pgm_routing_status" # New Redis stream name
-POLLING_INTERVAL_SECONDS = 30 # Poll PGM routing configs every 5 minutes
+POLLING_INTERVAL_SECONDS = 30 # Poll PGM routing configs every 30 seconds
 
 # IPs for main and backup domains
 MAIN_DOMAIN_IP = "172.19.185.81"
@@ -88,9 +88,19 @@ async def fetch_and_publish_pgm_routing_configs():
     """
     logging.info("Starting PGM Routing Config Agent cycle.")
     
-    if mysql_manager is None:
-        logging.error("MySQLManager is not initialized. Cannot fetch PGM routing configurations.")
+    # --- IMPORTANT FIX: Reconnect MySQL to fetch latest data ---
+    if mysql_manager:
+        mysql_manager.reconnect()
+    else:
+        logging.error("MySQLManager not initialized. Cannot reconnect.")
         return
+
+    # Ensure MySQLManager is initialized and connected after reconnect
+    if not mysql_manager.connection or not mysql_manager.connection.is_connected():
+        logging.error("MySQLManager not connected after reconnect attempt. Cannot fetch PGM routing configurations.")
+        return
+    # --- END IMPORTANT FIX ---
+
 
     pgm_routing_configs = mysql_manager.get_pgm_routing_configs()
     
@@ -103,6 +113,8 @@ async def fetch_and_publish_pgm_routing_configs():
         return
 
     logging.info(f"Found {len(pgm_routing_configs)} PGM routing configurations to process.")
+    logging.info(f"Found {pgm_routing_configs} PGM routing configurations to process.")
+
     # Log a sample of the fetched data to verify its content and freshness
     for i, config in enumerate(pgm_routing_configs[:5]): # Log first 5 configs
         logging.debug(f"Fetched config sample {i+1}: {json.dumps(config, indent=2)}") # Pretty print JSON
@@ -279,4 +291,3 @@ if __name__ == "__main__":
     except Exception as e:
         logging.critical(f"PGM Routing Config Agent terminated due to an unhandled error: {e}", exc_info=True)
         sys.exit(1)
-

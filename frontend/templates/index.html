@@ -10,7 +10,7 @@
         /* Custom styles for better visual impact and responsiveness */
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #1a202c; /* Dark background */
+            background-color: #080808; /* Dark background */
             color: #e2e8f0; /* Light text */
             overflow-x: hidden; /* Prevent horizontal scrolling */
             display: flex;
@@ -40,7 +40,7 @@
         }
 
         .dashboard-logo {
-            max-width: 80px; /* Reduced logo size */
+            max-width: 100px; /* Reduced logo size */
             height: auto;
             border-radius: 0.5rem; /* Rounded corners for the logo */
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
@@ -75,7 +75,7 @@
             top: 100%; /* Position below the header */
             left: 0;
             background-color: #2d3748; /* bg-gray-800 */
-            border-radius: 0.5rem; /* rounded-lg */
+            border-radius: 0.5rem;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
             z-index: 1000;
             min-width: 150px;
@@ -258,8 +258,8 @@
             background-color: #2d3748;
             border-radius: 0.6rem;
             margin: 0.75rem auto; /* Center with auto margins and add vertical space */
-            width: 100%; /* Take full width */
-            box-sizing: border-box; /* Include padding in width */
+            width: 100%;
+            box-sizing: border-box;
             box-shadow: 0 3px 5px rgba(0, 0, 0, 0.1);
             flex-shrink: 0;
             overflow-x: auto; /* Allow horizontal scrolling for table on small screens */
@@ -389,9 +389,6 @@
             .alarm-console-table td {
                 padding: 0.5rem;
                 font-size: 0.75rem;
-            }
-            .iframe-view-container iframe {
-                height: 100%; /* Further adjust iframe height for smaller screens */
             }
             .open-alarm-console-button {
                 top: 0.5rem;
@@ -632,10 +629,11 @@
                     <i class="fas fa-bars"></i>
                 </div>
                 <div id="dropdown-menu" class="dropdown-menu hidden">
-                    <a href="#" onclick="showView('dashboard')">Dashboard</a>
-                    <a href="#" onclick="showView('trending')">Trending</a>
-                    <a href="#" onclick="showView('ird-overview')">IRD Overview</a> <!-- NEW: IRD Overview link -->
-                    <a href="#" onclick="showView('config'); loadDeviceConfigs(); loadGlobalConfigs();">Config</a>
+                    <!-- Updated menu links to open in new tabs with view parameters -->
+                    <a href="/?view=dashboard" onclick="window.open(this.href, '_blank'); return false;" target="_blank" rel="noopener noreferrer">Dashboard</a>
+                    <a href="https://img-cdn.publive.online/fit-in/1280x960/filters:format(webp)/afaqs/media/post_attachments/3ffb6c3ced5b4ef914c73a09af551d4666f6367.png" target="_blank" rel="noopener noreferrer">Trending</a>
+                    <a href="/ird_overview" target="_blank" rel="noopener noreferrer">IRD Overview</a>
+                    <a href="/?view=config" onclick="window.open(this.href, '_blank'); return false;" target="_blank" rel="noopener noreferrer">Config</a>
                 </div>
             </div>
             <div class="dashboard-logo-container">
@@ -790,13 +788,13 @@
 
     <script>
         // Define the number of channels
-        const NUM_CHANNELS = 50;
+        const NUM_CHANNELS = 52; // Changed from 50 to 52
         const WS_URL = "ws://127.0.0.1:8000"; // WebSocket Notifier URL
         let ws; // WebSocket instance
 
         // Severity order for color mapping (higher value means higher severity)
         const SEVERITY_ORDER = {
-            'INFO': 0, 'OK': 0, 'NORMAL': 0,
+            'INFO': 0, 'OK': 0, 'NORMAL': 0, 'CLEARED': 0,
             'WARNING': 1, 'MINOR': 1,
             'ALARM': 2, 'MAJOR': 2,
             'ERROR': 3, 'CRITICAL': 3, 'FATAL': 3,
@@ -804,7 +802,7 @@
         };
 
         const SEVERITY_COLOR_CLASSES = {
-            'OK': 'status-ok', 'INFO': 'status-ok', 'NORMAL': 'status-ok',
+            'OK': 'status-ok', 'INFO': 'status-ok', 'NORMAL': 'status-ok', 'CLEARED': 'status-ok',
             'WARNING': 'status-warning', 'MINOR': 'status-warning',
             'ALARM': 'status-alarm', 'MAJOR': 'status-alarm',
             'ERROR': 'status-alarm', 'CRITICAL': 'status-alarm', 'FATAL': 'status-alarm',
@@ -840,6 +838,13 @@
             { id: 'G.WIN_PROC', name: 'Windows Processes', collectiveType: 'WINDOWS-PROCESS', displayIp: 'Local Network' },
         ];
 
+        // New: Map to associate channel device IDs (VS_M, VS_P, VS_B) with global block IDs
+        const channelDeviceToGlobalBlockMap = {
+            'VS_M': 'G.iloM',
+            'VS_P': 'G.iloP',
+            'VS_B': 'G.iloB'
+        };
+
         const API_BASE_URL = '/api/v1';
 
         // Global map to store latest status for each frontend block ID
@@ -848,7 +853,7 @@
         let currentBlockStatus = new Map();
 
         // Global map to store active alarms for the console
-        // key: unique alarm identifier (e.g., device_ip-message-severity)
+        // key: unique alarm identifier (e.g., device_ip-message-severity-frontend_block_id-oid)
         // value: latest alarm object
         let activeAlarms = new Map();
         let alarmConsoleUpdateTimer = null;
@@ -880,7 +885,13 @@
             document.getElementById('ird-overview-view').classList.add('hidden');
             document.getElementById('config-view').classList.add('hidden');
 
-            document.getElementById(`${viewId}-view`).classList.remove('hidden');
+            // Ensure the specific view's container is made visible
+            const targetViewElement = document.getElementById(`${viewId}-view`);
+            if (targetViewElement) {
+                targetViewElement.classList.remove('hidden');
+            } else {
+                console.warn(`showView: Element with ID '${viewId}-view' not found.`);
+            }
 
             if (viewId === 'config') {
                 switchConfigTab('device-config-tab');
@@ -888,6 +899,7 @@
                 loadGlobalConfigs();
             }
 
+            // Close the dropdown menu after selecting a view
             toggleMenu();
         }
 
@@ -907,145 +919,57 @@
         // --- WebSocket Logic ---
         function connectWebSocket() {
             if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+                console.log("WebSocket: Already connected or connecting, skipping new connection attempt."); // Debug log
                 return; // Already connected or connecting
             }
             ws = new WebSocket(WS_URL);
+            console.log("WebSocket: Attempting to connect to:", WS_URL); // Debug log
 
             ws.onopen = () => {
                 console.log("WebSocket connected!");
             };
 
             ws.onmessage = (event) => {
-                const message = JSON.parse(event.data);
-                console.log("WebSocket message received:", message);
-                processWebSocketMessage(message);
+                console.log("WebSocket: Raw message received:", event.data); // Debug log: Raw message
+                try {
+                    const message = JSON.parse(event.data);
+                    console.log("WebSocket: Parsed message:", message); // Debug log: Parsed message
+
+                    // Debugging specific values from the message
+                    console.log('DEBUG WS MESSAGE - frontend_block_id:', message.frontend_block_id);
+                    console.log('DEBUG WS MESSAGE - group_id:', message.group_id);
+                    console.log('DEBUG WS MESSAGE - status:', message.status);
+                    console.log('DEBUG WS MESSAGE - severity:', message.severity);
+                    console.log('DEBUG WS MESSAGE - message text:', message.message);
+                    console.log('DEBUG WS MESSAGE - pgm_dest:', message.pgm_dest);
+                    console.log('DEBUG WS MESSAGE - polled_value:', message.polled_value);
+                    console.log('DEBUG WS MESSAGE - expected_value:', message.expected_value);
+                    console.log('DEBUG WS MESSAGE - router_source:', message.router_source);
+
+
+                    processWebSocketMessage(message);
+                } catch (e) {
+                    console.error("WebSocket: Error parsing message JSON:", e, "Raw data:", event.data); // Debug log: JSON parse error
+                }
             };
 
             ws.onclose = (event) => {
-                console.warn("WebSocket disconnected:", event.code, event.reason);
+                console.warn("WebSocket disconnected:", event.code, event.reason); // Debug log
                 // Attempt to reconnect after a delay
                 setTimeout(connectWebSocket, 5000);
             };
 
             ws.onerror = (error) => {
-                console.error("WebSocket error:", error);
+                console.error("WebSocket error:", error); // Debug log
                 ws.close(); // Close to trigger onclose and retry
             };
         }
 
-        function processWebSocketMessage(message) {
-            // Added router_source, polled_value, expected_value, dest_name to destructuring
-            const { frontend_block_id, group_name, status, severity, message: msgText, pgm_dest, polled_value, expected_value, router_source } = message; 
-
-            let targetId = null;
-            let currentChannelNum = null; // For PGM blocks to get channel_name
-
-            if (frontend_block_id) {
-                // Determine if it's a channel block or global block
-                if (frontend_block_id.startsWith('C.')) {
-                    // Channel block ID format: C.<channel_id><device_code>
-                    // Extract channel number and device ID from frontend_block_id
-                    const match = frontend_block_id.match(/^C\.(\d+)([A-Z_]+|\d+)$/); // Allow device_code to be digits or text
-                    if (match) {
-                        const channelNum = parseInt(match[1]);
-                        const deviceCode = match[2]; // e.g., 101 for VSM, 04 for PGM block
-                        currentChannelNum = channelNum; // Store channel number
-
-                        let deviceBlueprint = null;
-                        if (!isNaN(parseInt(deviceCode))) { // If deviceCode is numeric (like '04', '05')
-                            const effectiveDeviceCode = (parseInt(deviceCode)).toString().padStart(2, '0'); // Ensure '04' for lookup
-                            deviceBlueprint = channelDevicesBlueprint.find(d => d.frontendBlockSuffix === effectiveDeviceCode);
-                        } else { // Assume it's directly the ID from blueprint (e.g., VS_M)
-                            deviceBlueprint = channelDevicesBlueprint.find(d => d.id === deviceCode);
-                        }
-
-                        if (deviceBlueprint) {
-                            // Normalize the incoming frontend_block_id to match the dashboard's generated IDs
-                            const normalizedFrontendBlockId = `C.${String(channelNum).padStart(2, '0')}${frontendBlockSuffixForId(deviceBlueprint.id)}`;
-                            targetId = normalizedFrontendBlockId; 
-                        } else {
-                            console.warn(`Could not find device blueprint for frontend_block_id: ${frontend_block_id}`);
-                        }
-
-                    } else {
-                        console.warn(`Invalid channel frontend_block_id format: ${frontend_block_id}`);
-                    }
-                } else { // Global block
-                    targetId = `global-${frontend_block_id}`; // Global blocks have a fixed prefix
-                }
-            } else if (group_name) {
-                // If only group_name is present, map it to the corresponding global block ID
-                const globalBlock = globalGroupStatusBlocks.find(block => block.name === group_name);
-                if (globalBlock) {
-                    targetId = `global-${globalBlock.id}`;
-                } else {
-                    console.warn(`Could not find global block for group_name: ${group_name}`);
-                }
-            }
-
-            if (targetId) {
-                const element = document.getElementById(targetId);
-                if (element) {
-                    updateStatusBlockFromWS(element, status, severity);
-
-                    // Special handling for PGM blocks (C.XX04, C.XX05 etc.)
-                    const blockIsPgm = channelDevicesBlueprint.some(d => 
-                        frontend_block_id.endsWith(d.frontendBlockSuffix) && d.isPgm
-                    );
-
-                    if (blockIsPgm) {
-                        // Pass all relevant PGM fields to the update function
-                        updatePgmBlockContent(element, msgText, pgm_dest, polled_value, expected_value, router_source, currentChannelNum); 
-                    }
-                } else {
-                    console.warn(`Target element with ID ${targetId} not found for WS update.`);
-                }
-            }
-            
-            // Manage the Alarm Console at the bottom of the dashboard
-            // Clear all alarms on 'OK' or 'INFO' status
-            if (SEVERITY_ORDER[severity.toUpperCase()] <= SEVERITY_ORDER['OK']) {
-                activeAlarms.clear(); // Clear all alarms
-                triggerImmediateAlarmConsoleUpdate(); // Re-render to show empty state
-            } else {
-                // Add the new alarm if it's not OK
-                const alarmEntry = {
-                    device_name: message.device_name || message.group_name || 'N/A',
-                    server_ip: message.device_ip || message.ip || 'N/A', // Use 'ip' if 'device_ip' is not present
-                    message: msgText || 'No message provided',
-                    severity: severity || 'UNKNOWN',
-                    timestamp: message.timestamp || message.time || new Date().toISOString(), // Use 'time' if 'timestamp' is not present
-                    frontend_block_id: frontend_block_id, // Add block ID for potential filtering
-                    type: message.agent_type || 'websocket',
-                    // NEW: Store PGM specific values in the active alarms map for consistent updates
-                    pgm_dest: pgm_dest,
-                    polled_value: polled_value,
-                    expected_value: expected_value,
-                    router_source: router_source // This is the source_name from consumer
-                };
-                // Use a more robust key for deduplication to prevent duplicate alarms for the same issue
-                const alarmKey = `${alarmEntry.server_ip}-${alarmEntry.message}-${alarmEntry.severity}-${alarmEntry.frontend_block_id}`;
-                
-                activeAlarms.set(alarmKey, alarmEntry); // Always set to ensure latest status
-                triggerImmediateAlarmConsoleUpdate(); // Debounced update
-            }
-        }
-
-        function updateStatusBlockFromWS(element, status, severity) {
-            const desiredClass = SEVERITY_COLOR_CLASSES[severity.toUpperCase()] || 'status-unknown';
-            
-            // Get current classes
-            const currentClasses = Array.from(element.classList);
-            
-            // Remove any existing status classes
-            const classesToRemove = ['status-ok', 'status-alarm', 'status-warning', 'status-unknown'];
-            element.classList.remove(...classesToRemove);
-            
-            // Add the new status class
-            element.classList.add(desiredClass);
-        }
-
-        // Helper function to get frontendBlockSuffix from blueprint based on device ID
+        /**
+         * Helper function to get the standardized frontendBlockSuffix from the blueprint based on device ID.
+         * @param {string} deviceId - The ID of the device (e.g., 'VS_M', 'CP_VS42M').
+         * @returns {string} The standardized suffix for the frontend block ID.
+         */
         function frontendBlockSuffixForId(deviceId) {
             const device = channelDevicesBlueprint.find(d => d.id === deviceId);
             if (device && device.frontendBlockSuffix) {
@@ -1060,32 +984,205 @@
             if (deviceId === 'DA_B') return '08';
             if (deviceId === 'DA_M_OUT') return '09';
             if (deviceId === 'DA_B_OUT') return '10';
+            console.warn(`frontendBlockSuffixForId: No suffix found for deviceId '${deviceId}'.`); // Debug log
             return ''; // Should not happen if all blueprints are complete
+        }
+
+        // NEW: Function to normalize frontend_block_id for consistent use
+        // Takes incoming "C.104" or "C.0104" and converts it to C.0104 format.
+        function normalizeFrontendBlockId(blockId) {
+            if (!blockId || !blockId.startsWith('C.')) {
+                // console.log(`normalizeFrontendBlockId: Returning '${blockId}' as is (not a channel block or invalid format).`); // Debug log
+                return blockId; // Return as is for global blocks or invalid format
+            }
+
+            // Regex to capture the numeric parts.
+            // It tries to find the channel number (any digits after C.) and the last two digits as the device suffix.
+            // C.104 -> channelNum="1", deviceSuffix="04"
+            // C.0204 -> channelNum="02", deviceSuffix="04"
+            // C.5204 -> channelNum="52", deviceSuffix="04"
+            const match = blockId.match(/^C\.(\d+)(\d{2})$/);
+            if (match) {
+                let channelNum = parseInt(match[1], 10); // e.g., 1 or 02 or 52
+                let deviceSuffix = match[2]; // e.g., 04 or 05
+
+                // Pad channel number to two digits (e.g., 1 -> 01)
+                const paddedChannelNum = String(channelNum).padStart(2, '0');
+                const normalized = `C.${paddedChannelNum}${deviceSuffix}`;
+                // console.log(`normalizeFrontendBlockId: Normalized '${blockId}' to '${normalized}'.`); // Debug log
+                return normalized;
+            }
+            console.warn(`normalizeFrontendBlockId: Could not normalize '${blockId}'. Returning original.`); // Debug log
+            return blockId; // If it doesn't match the expected pattern, return original
+        }
+
+        function processWebSocketMessage(message) {
+            const { frontend_block_id, group_name, group_id, status, severity, message: msgText, pgm_dest, polled_value, expected_value, router_source, oid } = message;
+
+            // Determine the target ID for the HTML element and the normalized ID for alarm storage
+            let targetIdForElement = null;
+            let normalizedIdForAlarmStorage = null;
+
+            if (frontend_block_id) {
+                // Prioritize frontend_block_id for channel blocks, normalize it
+                if (frontend_block_id.startsWith('C.')) {
+                    targetIdForElement = normalizeFrontendBlockId(frontend_block_id);
+                    normalizedIdForAlarmStorage = targetIdForElement;
+                }
+                // Then check if frontend_block_id itself is a global block ID (starts with G.)
+                else if (frontend_block_id.startsWith('G.')) {
+                    targetIdForElement = frontend_block_id;
+                    normalizedIdForAlarmStorage = frontend_block_id;
+                }
+            }
+
+            // Fallback to group_id if frontend_block_id isn't a recognized ID pattern
+            if (!targetIdForElement && group_id && group_id.startsWith('G.')) {
+                targetIdForElement = group_id;
+                normalizedIdForAlarmStorage = group_id;
+            }
+            // Final fallback: try to find global block by group_name
+            else if (!targetIdForElement && group_name) {
+                const globalBlock = globalGroupStatusBlocks.find(block => block.name === group_name);
+                if (globalBlock) {
+                    targetIdForElement = globalBlock.id;
+                    normalizedIdForAlarmStorage = globalBlock.id;
+                }
+            }
+
+            console.log(`processWebSocketMessage: Original FB ID: '${frontend_block_id}', Original Group ID: '${group_id}'. Target HTML ID: '${targetIdForElement}', Normalized for storage: '${normalizedIdForAlarmStorage}'.`); // Debug log
+
+
+            if (targetIdForElement) {
+                const element = document.getElementById(targetIdForElement);
+                if (element) {
+                    console.log(`processWebSocketMessage: Found element for ID '${targetIdForElement}'. Updating status.`); // Debug log
+                    // Update status for the found element
+                    updateStatusBlockFromWS(element, status, severity);
+
+                    const deviceBlueprint = channelDevicesBlueprint.find(d => element.dataset.deviceId === d.id);
+                    const isPgmBlockElement = deviceBlueprint && deviceBlueprint.isPgm;
+
+                    if (isPgmBlockElement) {
+                         // Extract the raw channel number from the normalized ID for PGM block content updates
+                        const channelNumMatch = normalizedIdForAlarmStorage.match(/^C\.(\d{2})(\d{2})$/);
+                        const rawChannelNum = channelNumMatch ? parseInt(channelNumMatch[1], 10) : null;
+                        console.log(`processWebSocketMessage: Element '${targetIdForElement}' is a PGM block. Raw Channel Num: ${rawChannelNum}`); // Debug log
+
+                        updatePgmBlockContent(element, msgText, pgm_dest, polled_value, expected_value, router_source, rawChannelNum);
+                    } else {
+                        console.log(`processWebSocketMessage: Element '${targetIdForElement}' is NOT a PGM block. Content update skipped.`); // Debug log
+                    }
+                } else {
+                    console.warn(`processWebSocketMessage: Target HTML element with ID '${targetIdForElement}' not found for WS update.`); // Debug log
+                }
+            } else {
+                console.warn(`processWebSocketMessage: Could not determine target HTML ID for WS message:`, message); // Debug log
+            }
+
+            // --- Alarm Console Management ---
+            const currentSeverityRank = SEVERITY_ORDER[severity.toUpperCase()];
+
+            // A unique key for each *alarm instance* for deduplication in activeAlarms map.
+            // Use group_id or frontend_block_id based on what's available and normalized, plus other unique identifiers.
+            const uniqueAlarmKey = `${message.ip || message.server_ip || 'N/A'}-` +
+                                   `${msgText || 'No message'}-` +
+                                   `${severity}-` +
+                                   `${normalizedIdForAlarmStorage || 'N/A'}-` +
+                                   `${oid || 'N/A'}`; // Include OID for KMX/IRD specific alarms if present
+
+            console.log(`Alarm Console Management: Processing alarm for '${normalizedIdForAlarmStorage}' with key '${uniqueAlarmKey}'. Severity: ${severity} (Rank: ${currentSeverityRank})`); // Debug log
+
+            if (currentSeverityRank <= SEVERITY_ORDER['OK']) { // This now correctly handles 'OK', 'INFO', 'NORMAL', 'CLEARED'
+                // If the message indicates OK/INFO/CLEARED status, remove this specific alarm from activeAlarms
+                if (activeAlarms.has(uniqueAlarmKey)) {
+                    activeAlarms.delete(uniqueAlarmKey);
+                    console.log(`Alarm Console: Cleared specific alarm: ${uniqueAlarmKey}. Remaining alarms: ${activeAlarms.size}`); // Debug log
+                } else {
+                    // If a general 'OK' or 'CLEARED' message for a block,
+                    // and no specific alarm key matched, clear all alarms related to that block ID.
+                    const keysToRemove = [];
+                    activeAlarms.forEach((alarm, key) => {
+                        if (alarm.frontend_block_id === normalizedIdForAlarmStorage || alarm.group_id === normalizedIdForAlarmStorage) {
+                            keysToRemove.push(key);
+                        }
+                    });
+                    if (keysToRemove.length > 0) {
+                        keysToRemove.forEach(key => activeAlarms.delete(key));
+                        console.log(`Alarm Console: Cleared ${keysToRemove.length} alarms for block ${normalizedIdForAlarmStorage}. Remaining alarms: ${activeAlarms.size}`); // Debug log
+                    } else {
+                        console.log(`Alarm Console: No specific alarm to clear for key '${uniqueAlarmKey}' or block '${normalizedIdForAlarmStorage}'. Current alarms: ${activeAlarms.size}`); // Debug log
+                    }
+                }
+            } else {
+                // If it's an alarm (WARNING, ALARM, ERROR, CRITICAL), add/update it in the activeAlarms map
+                const alarmEntry = {
+                    device_name: message.device_name || message.group_name || 'N/A',
+                    server_ip: message.device_ip || message.ip || 'N/A',
+                    message: msgText || 'No message provided',
+                    severity: severity || 'UNKNOWN',
+                    timestamp: message.timestamp || message.time || new Date().toISOString(),
+                    frontend_block_id: normalizedIdForAlarmStorage, // Use the normalized ID for storage
+                    group_id: group_id, // Store group_id from message
+                    type: message.agent_type || 'websocket',
+                    pgm_dest: pgm_dest,
+                    polled_value: polled_value,
+                    expected_value: expected_value,
+                    router_source: router_source,
+                    oid: oid // Store OID if present
+                };
+                activeAlarms.set(uniqueAlarmKey, alarmEntry);
+                console.log(`Alarm Console: Added/Updated alarm for ${normalizedIdForAlarmStorage}. Total alarms: ${activeAlarms.size}`); // Debug log
+            }
+            triggerImmediateAlarmConsoleUpdate(); // Always trigger update after processing
+            console.log('Alarm Console: Current activeAlarms map size:', activeAlarms.size); // Final size check
+
+            // IMPORTANT: Trigger update for ALL global blocks after any message is processed
+            // This ensures all collective blocks reflect the latest state immediately.
+            globalGroupStatusBlocks.forEach(gb => updateGlobalBlockLogic(gb.id));
+        }
+
+        function updateStatusBlockFromWS(element, status, severity) {
+            const desiredClass = SEVERITY_COLOR_CLASSES[severity.toUpperCase()] || 'status-unknown';
+
+            // Get current classes
+            const currentClasses = Array.from(element.classList);
+
+            // Remove any existing status classes
+            const classesToRemove = ['status-ok', 'status-alarm', 'status-warning', 'status-unknown'];
+            element.classList.remove(...classesToRemove);
+
+            // Add the new status class
+            element.classList.add(desiredClass);
+            console.log(`UI Update: Element ID '${element.id}' updated to class '${desiredClass}' for severity '${severity}'.`); // Debug log
         }
 
         // Modified updatePgmBlockContent to use router_source and pgm_dest for display, and handle channel name
         function updatePgmBlockContent(element, message, pgmDestFromWS, polledValueFromWS, expectedValueFromWS, routerSourceFromWS, channelNum) {
-            const blockId = element.dataset.frontendBlockId;
-            const pgmConfig = pgmRoutingMap.get(blockId) || {};
-            // Channel name for PGM blocks (e.g., C.104, C.204) should come from pgmRoutingMap
-            // Fallback to a generic channel name if not found in pgmConfig
-            const channelNameFromPgmConfig = pgmConfig.channel_name || `Channel ${String(channelNum).padStart(2, '0')}`;
+            const blockId = element.dataset.frontendBlockId; // This is the HTML element's ID (e.g., C.0104)
+            let pgmConfig = pgmRoutingMap.get(blockId);
+
+            pgmConfig = pgmConfig || {}; // Ensure pgmConfig is an object even if not found
+
+            // Channel name for PGM blocks: Use channelNum passed or fallback
+            // `channelNum` here should be the raw integer from the incoming message for better accuracy
+            const displayChannelNum = channelNum !== null ? String(channelNum).padStart(2, '0') : 'N/A';
+            // Always get channel name from config (pgmRoutingMap) or a sensible default
+            const channelNameFromConfig = pgmConfig.channel_name || `Channel ${displayChannelNum}`;
 
             let firstRowText = '';
-            let secondRowText = '';
+            let secondRowText = channelNameFromConfig; // Second row always PGM09M (channel_name)
 
             // Prioritize values from WebSocket message for the first row if a mismatch alarm
-            // Use the "router_source" from WS for the first part of the first row (Router Source)
-            // Use "pgm_dest" from WS for the second part of the first row (PGM Destination)
             if (message && message.includes("PGM Routing MISMATCH")) {
-                firstRowText = `${routerSourceFromWS || polledValueFromWS || pgmConfig.router_source || 'Router N/A'} - ${pgmDestFromWS || pgmConfig.pgm_dest || 'Dest N/A'}`;
-                secondRowText = `Router: ${routerSourceFromWS || 'N/A'}`; // Second row displays router_source from WebSocket
+                // Desired: 'polled_value' - 225
+                firstRowText = `${polledValueFromWS || 'N/A'} - ${pgmDestFromWS || pgmConfig.pgm_dest || 'N/A'}`;
+                console.log(`PGM Content: Mismatch detected for ${blockId}. Displaying dynamic content: ${firstRowText} / ${secondRowText}`); // Debug log
             } else {
                 // If no mismatch alarm, or alarm cleared (status OK/INFO), revert to default display
-                // Top row: router_source - pgm_dest from DB (pgmRoutingMap)
+                // Desired: 153 - 225 (router_source - pgm_dest from config)
                 firstRowText = `${pgmConfig.router_source || 'Router N/A'} - ${pgmConfig.pgm_dest || 'Dest N/A'}`;
-                // Bottom row: channel_name from DB (pgmRoutingMap or fallback)
-                secondRowText = channelNameFromPgmConfig;
+                console.log(`PGM Content: No mismatch for ${blockId}. Displaying config content: ${firstRowText} / ${secondRowText}`); // Debug log
             }
 
             element.innerHTML = `
@@ -1094,11 +1191,103 @@
             `;
         }
 
+        /**
+         * Updates the status of a specific global block based on the highest severity
+         * of its associated alarms.
+         * @param {string} globalBlockId - The ID of the global block (e.g., 'G.iloM', 'G.COMPRESSION_M').
+         */
+        function updateGlobalBlockLogic(globalBlockId) {
+            const globalBlockElement = document.getElementById(globalBlockId);
+            if (!globalBlockElement) {
+                console.warn(`updateGlobalBlockLogic: Global block element with ID '${globalBlockId}' not found.`);
+                return;
+            }
+
+            const globalBlockDef = globalGroupStatusBlocks.find(b => b.id === globalBlockId);
+            if (!globalBlockDef) {
+                console.warn(`updateGlobalBlockLogic: Global block definition for ID '${globalBlockId}' not found.`);
+                return;
+            }
+
+            let highestOverallSeverityRank = SEVERITY_ORDER['OK']; // Start with OK
+            let highestOverallSeverityName = 'OK'; // Default severity name
+            let relevantAlarmsCount = 0; // For debugging
+
+            // Find the associated channel device ID if this global block is an iLO type
+            let associatedIloChannelDeviceId = null;
+            for (const deviceId in channelDeviceToGlobalBlockMap) {
+                if (channelDeviceToGlobalBlockMap[deviceId] === globalBlockId) {
+                    associatedIloChannelDeviceId = deviceId;
+                    break;
+                }
+            }
+
+            activeAlarms.forEach(alarm => {
+                let isRelevantAlarm = false;
+
+                // Rule 1: Direct alarm on this global block
+                // (e.g., an alarm whose frontend_block_id or group_id is 'G.COMPRESSION_M')
+                if (alarm.group_id === globalBlockId || alarm.frontend_block_id === globalBlockId) {
+                    isRelevantAlarm = true;
+                    // console.log(`DEBUG: Alarm for ${globalBlockId} is DIRECT. Alarm ID: ${alarm.frontend_block_id || alarm.group_id}`); // More specific debug
+                }
+
+                // Rule 2: iLO Channel-to-global block aggregation (specific for G.iloM/P/B)
+                // Checks alarms from C.XX01 (VS_M), C.XX02 (VS_P), C.XX03 (VS_B)
+                else if (associatedIloChannelDeviceId && alarm.frontend_block_id && alarm.frontend_block_id.startsWith('C.')) {
+                    const alarmDeviceSuffix = alarm.frontend_block_id.slice(-2); // Get the '01', '02', '03' part
+                    if (
+                        (associatedIloChannelDeviceId === 'VS_M' && alarmDeviceSuffix === '01') ||
+                        (associatedIloChannelDeviceId === 'VS_P' && alarmDeviceSuffix === '02') ||
+                        (associatedIloChannelDeviceId === 'VS_B' && alarmDeviceSuffix === '03')
+                    ) {
+                        isRelevantAlarm = true;
+                        // console.log(`DEBUG: Alarm for ${globalBlockId} is ILO CHANNEL AGGREGATION. Channel Block: ${alarm.frontend_block_id}`); // More specific debug
+                    }
+                }
+
+                // Rule 3: General collectiveType aggregation for other global blocks
+                // This covers blocks like 'Encoder M', 'Cisco D9800', 'Windows Processes'
+                // We need to check if the alarm's attributes (type, group_name, device_name)
+                // relate to the global block's collectiveType.
+                else if (globalBlockDef.collectiveType) {
+                    const normalizedCollectiveType = globalBlockDef.collectiveType.toUpperCase();
+
+                    // Check if alarm's attributes contain the collectiveType (case-insensitive)
+                    if ( (alarm.type && alarm.type.toUpperCase().includes(normalizedCollectiveType)) ||
+                         (alarm.group_name && alarm.group_name.toUpperCase().includes(normalizedCollectiveType)) ||
+                         (alarm.device_name && alarm.device_name.toUpperCase().includes(normalizedCollectiveType)) ) {
+                        isRelevantAlarm = true;
+                        // console.log(`DEBUG: Alarm for ${globalBlockId} is COLLECTIVE TYPE (via includes). Relevant data: type='${alarm.type}', group_name='${alarm.group_name}', device_name='${alarm.device_name}'`); // More specific debug
+                    }
+                }
+
+                if (isRelevantAlarm) {
+                    relevantAlarmsCount++;
+                    const currentAlarmSeverityRank = SEVERITY_ORDER[alarm.severity.toUpperCase()];
+                    if (currentAlarmSeverityRank > highestOverallSeverityRank) {
+                        highestOverallSeverityRank = currentAlarmSeverityRank;
+                        highestOverallSeverityName = alarm.severity;
+                    }
+                }
+            });
+
+            console.log(`updateGlobalBlockLogic: Global block '${globalBlockId}' highest effective severity: ${highestOverallSeverityName} (from ${relevantAlarmsCount} relevant alarms).`);
+
+            // If no relevant alarms are found, ensure it defaults to OK
+            if (relevantAlarmsCount === 0) {
+                 highestOverallSeverityName = 'OK';
+            }
+
+            // Update the global block's visual status
+            updateStatusBlockFromWS(globalBlockElement, 'dummy_status', highestOverallSeverityName);
+        }
 
         // Debounced function to trigger alarm console re-render with deduplication
         function triggerImmediateAlarmConsoleUpdate() {
             clearTimeout(alarmConsoleUpdateTimer);
             alarmConsoleUpdateTimer = setTimeout(() => {
+                console.log("Alarm Console: Triggering immediate update. Current active alarms:", activeAlarms.size); // Debug log
                 // Convert map values to array for sorting and rendering
                 const alarmsToDisplay = Array.from(activeAlarms.values());
 
@@ -1116,32 +1305,42 @@
 
         // Function to fetch all active alarms from Flask backend (Elasticsearch)
         async function fetchAllAlarmsFromBackend() {
+            console.log('Fetching all alarms from backend.'); // Debug log
             try {
-                const response = await fetch(`${API_BASE_URL}/get_all_active_alarms`);
+                // Corrected API endpoint to match main.py's historical_alarms endpoint
+                const response = await fetch(`${API_BASE_URL}/historical_alarms`, {
+                    method: 'GET', // main.py's historical_alarms is GET
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
                 if (!response.ok) {
                     const errorText = await response.text();
-                    console.error(`Failed to fetch all alarms from backend: ${response.status} - ${errorText}`);
+                    console.error(`Failed to fetch all alarms from backend: ${response.status} - ${errorText}`); // Debug log
                     return;
                 }
                 const data = await response.json();
-                
+
                 // Clear existing alarms and populate from backend
                 activeAlarms.clear();
-                (data.alarms || []).forEach(alarm => {
-                    // Normalize frontend_block_id from alarm before storing
-                    if (alarm.frontend_block_id && alarm.frontend_block_id.startsWith('C.') && alarm.frontend_block_id.match(/^C\.(\d)([0-9A-Z_]+)$/)) {
-                         alarm.frontend_block_id = alarm.frontend_block_id.replace(/^C\.(\d)([0-9A-Z_]+)$/, (match, channelNum, suffix) => {
-                            return `C.0${channelNum}${suffix}`;
-                        });
-                    }
+                // Access 'hits' array and then '_source' as per main.py's response structure
+                (data.hits || []).forEach(hit => {
+                    const alarm = hit._source;
+                    // MODIFICATION: Normalize frontend_block_id from alarm before storing
+                    alarm.frontend_block_id = normalizeFrontendBlockId(alarm.frontend_block_id);
+
                     // Ensure backend alarms also have a unique key for deduplication
-                    const alarmKey = `${alarm.server_ip}-${alarm.message}-${alarm.severity}-${alarm.frontend_block_id || ''}`;
+                    // Use a more robust key to uniquely identify the alarm, considering OID if available
+                    const alarmKey = `${alarm.device_ip || alarm.ip}-` +
+                                     `${alarm.message}-` +
+                                     `${alarm.severity}-` +
+                                     `${alarm.frontend_block_id || ''}-` +
+                                     `${alarm.oid || ''}`; // Include OID for uniqueness if it's there
                     activeAlarms.set(alarmKey, alarm);
                 });
-                console.log(`Fetched ${activeAlarms.size} active alarms from backend.`);
+                console.log(`Fetched ${activeAlarms.size} active alarms from backend. Populated activeAlarms map.`); // Debug log
                 triggerImmediateAlarmConsoleUpdate(); // Render after initial fetch
             } catch (error) {
-                console.error("Error fetching all alarms from backend:", error);
+                console.error("Error fetching all alarms from backend:", error); // Debug log
             }
         }
 
@@ -1155,9 +1354,12 @@
                 const noAlarmsRow = document.createElement('tr');
                 noAlarmsRow.innerHTML = `<td colspan="5" class="text-center py-4">No active alarms found.</td>`;
                 tableBody.appendChild(noAlarmsRow);
+                console.log("Alarm Console: No active alarms to display."); // Debug log
             } else {
                 // Limit to 30 alarms for display (adjust as needed for performance/readability)
                 const alarmsToDisplay = alarms.slice(0, 30);
+                console.log(`Alarm Console: Displaying ${alarmsToDisplay.length} alarms.`); // Debug log
+
                 alarmsToDisplay.forEach(alarm => {
                     const row = document.createElement('tr');
                     let timeFormatted = alarm.timestamp;
@@ -1165,7 +1367,7 @@
                         const date = new Date(alarm.timestamp);
                         timeFormatted = date.toLocaleString();
                     } catch (e) {
-                        console.warn("Could not parse alarm timestamp:", alarm.timestamp, e);
+                        console.warn("Could not parse alarm timestamp:", alarm.timestamp, e); // Debug log
                     }
 
                     // 'channel_name' and 'device_name' are provided by the backend for both iLO and Windows
@@ -1191,60 +1393,63 @@
         function openFullAlarmConsole(blockId) {
             let url = '/alarm_console_fullscreen';
             if (blockId) {
+                // MODIFICATION: Normalize the blockId before passing to the full console
+                blockId = normalizeFrontendBlockId(blockId);
                 url += `?block_id=${blockId}`;
             }
             window.open(url, '_blank');
-            console.log("Attempting to open full alarm console with URL:", url);
+            console.log("Attempting to open full alarm console with URL:", url); // Debug log
         }
         window.openFullAlarmConsole = openFullAlarmConsole;
 
         // Function to fetch channel names from backend (MySQL)
         async function fetchChannelNames() {
+            console.log("Fetching channel names from backend."); // Debug log
             try {
                 const response = await fetch(`${API_BASE_URL}/get_channel_configs`);
                 if (!response.ok) {
-                    console.error(`Failed to fetch channel configs: ${response.status}`);
+                    console.error(`Failed to fetch channel configs: ${response.status}`); // Debug log
                     return;
                 }
                 const data = await response.json();
                 channelNamesMap.clear();
                 (data.channels || []).forEach(channel => {
-                    channelNamesMap.set(channel.id.toString(), channel.channel_name);
+                    // Ensure the key in channelNamesMap is always padded (e.g., "01", "10", "100")
+                    channelNamesMap.set(String(channel.id).padStart(2, '0'), channel.channel_name);
                 });
-                console.log("Channel names loaded:", channelNamesMap);
+                console.log("Channel names loaded:", channelNamesMap); // Debug log
             } catch (error) {
-                console.error("Error fetching channel names:", error);
+                console.error("Error fetching channel names:", error); // Debug log
             }
         }
 
         // NEW: Function to fetch PGM routing configurations
         async function fetchPgmRoutingConfigs() {
+            console.log("Fetching PGM routing configurations."); // Debug log
             try {
                 const response = await fetch(`${API_BASE_URL}/get_pgm_routing_configurations`);
                 if (!response.ok) {
-                    console.error(`Failed to fetch PGM routing configs: ${response.status}`);
+                    console.error(`Failed to fetch PGM routing configs: ${response.status}`); // Debug log
                     return;
                 }
                 const data = await response.json();
                 pgmRoutingMap.clear();
                 (data.pgm_configs || []).forEach(config => {
                     if (config.frontend_block_id) {
-                        // Normalize frontend_block_id from DB to ensure leading zeros for channel numbers 1-9
-                        // Example: "C.104" becomes "C.0104" if the channel number is single digit
-                        const normalizedId = config.frontend_block_id.replace(/^C\.(\d)([0-9A-Z_]+)$/, (match, channelNum, suffix) => {
-                            return `C.0${channelNum}${suffix}`;
-                        });
+                        // MODIFICATION: Normalize frontend_block_id before storing in pgmRoutingMap
+                        const normalizedId = normalizeFrontendBlockId(config.frontend_block_id);
                         pgmRoutingMap.set(normalizedId, config);
                     }
                 });
-                console.log("PGM Routing configurations loaded:", pgmRoutingMap);
+                console.log("PGM Routing configurations loaded:", pgmRoutingMap); // Debug log
             } catch (error) {
-                console.error("Error fetching PGM routing configurations:", error);
+                console.error("Error fetching PGM routing configurations:", error); // Debug log
             }
         }
 
         // Function to render the dashboard (channels and global blocks)
         async function renderDashboard() {
+            console.log("Rendering dashboard."); // Debug log
             await fetchChannelNames(); // Fetch channel names before rendering
             await fetchPgmRoutingConfigs(); // NEW: Fetch PGM routing configs before rendering
             const dashboardContainer = document.getElementById('dashboard');
@@ -1252,8 +1457,9 @@
 
             for (let i = 1; i <= NUM_CHANNELS; i++) {
                 const channelIdNum = i; // Use the numerical ID for lookup
-                // This 'channelName' is for the overall channel block heading (h2)
-                const channelNameForHeading = channelNamesMap.get(String(i).padStart(2, '0')) || `Channel ${String(i).padStart(2, '0')}`;
+                // Get channel name from map, then prefix with channel number
+                const channelNameFromMap = channelNamesMap.get(String(i).padStart(2, '0')) || `Channel ${String(i).padStart(2, '0')}`;
+                const channelNameForHeading = `${i} - ${channelNameFromMap}`; // Prefix with channel number
 
                 const channelBlock = document.createElement('div');
                 channelBlock.id = `channel-${channelIdNum}`; // ID based on numerical channel ID
@@ -1275,33 +1481,25 @@
                         const device = deviceMap.get(area);
                         if (device) {
                             let displayText = '';
-                            let dynamicFrontendBlockId = '';
-
-                            // Construct frontend_block_id based on pattern (C.channelid + device_specific_id)
-                            let frontendBlockSuffix = '';
-                            if (device.frontendBlockSuffix) {
-                                frontendBlockSuffix = device.frontendBlockSuffix;
-                            } else {
-                                frontendBlockSuffix = frontendBlockSuffixForId(device.id); // Get suffix from helper
-                            }
-
-                            dynamicFrontendBlockId = `C.${String(channelIdNum).padStart(2, '0')}${frontendBlockSuffix}`; // Ensure channel ID is 2 digits
+                            // HTML element IDs are consistently padded (e.g., C.0104)
+                            const dynamicFrontendBlockId = `C.${String(channelIdNum).padStart(2, '0')}${frontendBlockSuffixForId(device.id)}`;
 
                             if (device.isPgm) {
-                                // For PGM blocks, use fetched PGM routing data for initial display
-                                const pgmConfig = pgmRoutingMap.get(dynamicFrontendBlockId);
-                                if (pgmConfig) {
-                                    // Top row: router_source - pgm_dest from DB
-                                    // Bottom row: channel_name from DB (from pgmRoutingMap for this specific PGM block)
-                                    displayText = `<div class="text-xs font-bold">${pgmConfig.router_source || 'Router N/A'} - ${pgmConfig.pgm_dest || 'Dest N/A'}</div>
-                                                   <div class="text-xs">${pgmConfig.channel_name || 'Channel N/A'}</div>`; // Use pgmConfig.channel_name
-                                } else {
-                                    // Fallback if no PGM config found for this block ID
-                                    displayText = `<div class="text-xs font-bold">${device.name}</div><div class="text-xs">Config Missing</div>`;
-                                }
+                                // For PGM blocks, try to get config using the padded ID
+                                let pgmConfig = pgmRoutingMap.get(dynamicFrontendBlockId);
+
+                                pgmConfig = pgmConfig || {}; // Ensure pgmConfig is an object even if not found
+
+                                // Use channelNum for fallback display, ensuring it's not null/undefined
+                                const displayChannelNum = String(channelIdNum).padStart(2, '0');
+
+                                // Render initial content for PGM blocks based on config (normal state)
+                                displayText = `<div class="text-xs font-bold">${pgmConfig.router_source || 'Router N/A'} - ${pgmConfig.pgm_dest || 'Dest N/A'}</div>
+                                               <div class="text-xs">${pgmConfig.channel_name || `Channel ${displayChannelNum}`}</div>`;
+
                             } else {
                                 // For non-PGM blocks, use the default name
-                                displayText = `<div>${device.name}</div>`; // Ensure other blocks also have content within a div for consistent styling
+                                displayText = `<div>${device.name}</div>`;
                             }
 
                             channelDevicesHtml += `
@@ -1311,6 +1509,7 @@
                                      data-channel-num="${channelIdNum}"
                                      data-device-id="${device.id}"
                                      data-frontend-block-id="${dynamicFrontendBlockId}"
+                                     data-is-pgm="${device.isPgm}"
                                      onclick="openFullAlarmConsole('${dynamicFrontendBlockId}')">
                                     ${displayText}
                                 </div>
@@ -1335,7 +1534,7 @@
 
             globalGroupStatusBlocks.forEach(groupBlock => {
                 const blockDiv = document.createElement('div');
-                blockDiv.id = `global-${groupBlock.id}`; // Matches the ID used in globalGroupStatusBlocks
+                blockDiv.id = groupBlock.id; // Corrected: ID should be G.iloM directly for global blocks
                 blockDiv.className = 'global-status-block status-unknown'; // Default to unknown initially
                 blockDiv.setAttribute('data-group-id', groupBlock.id); // Add data attribute for easier lookup
                 blockDiv.setAttribute('data-frontend-block-id', groupBlock.id); // Also set frontend_block_id for global blocks
@@ -1345,12 +1544,13 @@
 
                 blockDiv.innerHTML = `
                     <div class="block-name">${groupBlock.name}</div>
-                    <div class="block-ip">${displayIp}</div>
+                    <div class="block-ip"></div>
                 `;
                 globalGroupStatusContainer.appendChild(blockDiv);
             });
             // Initial poll to set statuses based on current ES data
             await updateAllStatuses();
+            console.log("Dashboard rendering complete."); // Debug log
         }
 
         // --- Configuration Management Functions ---
@@ -1358,6 +1558,7 @@
         const DEVICE_GROUPS = ["HP-iLO", "D9800-PIRD", "CISCO Switch", "NEXUS-Switch", "Catalyst-SW", "WINDOWS-PROCESS", "HTTP_status"];
 
         function populateDeviceGroupDropdowns() {
+            console.log("Populating device group dropdowns."); // Debug log
             const deviceGroupSelect = document.getElementById('deviceGroup');
             const globalDeviceGroupSelect = document.getElementById('globalDeviceGroup');
 
@@ -1379,9 +1580,11 @@
                 option2.textContent = group;
                 globalDeviceGroupSelect.appendChild(option2);
             });
+            console.log("Device group dropdowns populated."); // Debug log
         }
 
         function validateForm(formId) {
+            console.log(`Validating form: ${formId}`); // Debug log
             const form = document.getElementById(formId);
             let isValid = true;
             form.querySelectorAll('input[required], select[required]').forEach(input => {
@@ -1390,6 +1593,7 @@
                     isValid = false;
                     input.classList.add('border-red-500');
                     if (errorSpan) errorSpan.classList.remove('hidden');
+                    console.log(`Validation Error: '${input.id}' is empty.`); // Debug log
                 } else if (input.type === 'text' && input.pattern && !new RegExp(input.pattern).test(input.value)) {
                     isValid = false;
                     input.classList.add('border-red-500');
@@ -1397,16 +1601,19 @@
                          errorSpan.textContent = input.title || "Invalid format.";
                          errorSpan.classList.remove('hidden');
                     }
+                    console.log(`Validation Error: '${input.id}' has invalid format.`); // Debug log
                 } else {
                     input.classList.remove('border-red-500');
                     if (errorSpan) errorSpan.classList.add('hidden');
                 }
             });
+            console.log(`Form '${formId}' validation result: ${isValid}`); // Debug log
             return isValid;
         }
 
         function saveDeviceConfig(event) {
             event.preventDefault();
+            console.log("Attempting to save device config."); // Debug log
             if (!validateForm('device-config-form')) {
                 showMessageBox("Validation Error", "Please fill in all mandatory fields correctly.");
                 return;
@@ -1428,7 +1635,7 @@
                 createdAt: new Date().toISOString()
             };
             deviceConfigs.push(newConfig);
-            console.log("Device config added (in-memory): ", newConfig);
+            console.log("Device config added (in-memory): ", newConfig); // Debug log
             showMessageBox("Success", "Device configuration added! (Not saved persistently)");
             document.getElementById('device-config-form').reset();
             loadDeviceConfigs();
@@ -1436,11 +1643,13 @@
         window.saveDeviceConfig = saveDeviceConfig;
 
         function loadDeviceConfigs() {
+            console.log("Loading device configs."); // Debug log
             const listDiv = document.getElementById('device-config-list');
             listDiv.innerHTML = '';
 
             if (deviceConfigs.length === 0) {
                 listDiv.innerHTML = '<p class="text-gray-400">No device configurations saved for this session.</p>';
+                console.log("No device configs found."); // Debug log
                 return;
             }
 
@@ -1457,21 +1666,26 @@
                 `;
                 listDiv.appendChild(itemDiv);
             });
+            console.log(`Loaded ${deviceConfigs.length} device configs.`); // Debug log
         }
         window.loadDeviceConfigs = loadDeviceConfigs;
 
         function deleteDeviceConfig(id) {
-            if (!confirm('Are you sure you want to delete this device configuration from this session?')) return;
-
-            deviceConfigs = deviceConfigs.filter(config => config.id !== id);
-            showMessageBox("Success", "Device configuration deleted from this session.");
-            loadDeviceConfigs();
+            console.log(`Attempting to delete device config with ID: ${id}`); // Debug log
+            // Use showMessageBox instead of confirm for user interaction
+            showMessageBox("Confirm Deletion", "Are you sure you want to delete this device configuration from this session? (Note: This is not persistent.)", true, () => {
+                deviceConfigs = deviceConfigs.filter(config => config.id !== id);
+                showMessageBox("Success", "Device configuration deleted from this session.");
+                loadDeviceConfigs();
+                console.log(`Device config ${id} deleted.`); // Debug log
+            });
         }
         window.deleteDeviceConfig = deleteDeviceConfig;
 
 
         function saveGlobalConfig(event) {
             event.preventDefault();
+            console.log("Attempting to save global config."); // Debug log
             if (!validateForm('global-config-form')) {
                 showMessageBox("Validation Error", "Please fill in all mandatory fields correctly.");
                 return;
@@ -1495,7 +1709,7 @@
                 createdAt: new Date().toISOString()
             };
             globalConfigs.push(newConfig);
-            console.log("Global config added (in-memory): ", newConfig);
+            console.log("Global config added (in-memory): ", newConfig); // Debug log
             showMessageBox("Success", "Global configuration added! (Not saved persistently)");
             document.getElementById('global-config-form').reset();
             loadGlobalConfigs();
@@ -1510,16 +1724,21 @@
                     displayIp: globalDeviceIP // Add IP for display
                 });
                 renderDashboard(); // Re-render to show new block
+                console.log(`New global block '${newGlobalBlockId}' added and dashboard re-rendered.`); // Debug log
+            } else {
+                console.log(`Global block '${newGlobalBlockId}' already exists. Not adding duplicate.`); // Debug log
             }
         }
         window.saveGlobalConfig = saveGlobalConfig;
 
         function loadGlobalConfigs() {
+            console.log("Loading global configs."); // Debug log
             const listDiv = document.getElementById('global-config-list');
             listDiv.innerHTML = '';
 
             if (globalConfigs.length === 0) {
                 listDiv.innerHTML = '<p class="text-gray-400">No global configurations saved for this session.</p>';
+                console.log("No global configs found."); // Debug log
                 return;
             }
 
@@ -1536,67 +1755,135 @@
                 `;
                 listDiv.appendChild(itemDiv);
             });
+            console.log(`Loaded ${globalConfigs.length} global configs.`); // Debug log
         }
         window.loadGlobalConfigs = loadGlobalConfigs;
 
         function deleteGlobalConfig(id) {
-            if (!confirm('Are you sure you want to delete this global configuration from this session?')) return;
+            console.log(`Attempting to delete global config with ID: ${id}`); // Debug log
+            // Use showMessageBox instead of confirm for user interaction
+            showMessageBox("Confirm Deletion", "Are you sure you want to delete this global configuration from this session? (Note: This is not persistent.)", true, () => {
+                const deletedConfig = globalConfigs.find(config => config.id === id);
+                globalConfigs = globalConfigs.filter(config => config.id !== id);
+                showMessageBox("Success", "Global configuration deleted from this session.");
+                loadGlobalConfigs();
+                console.log(`Global config ${id} deleted.`); // Debug log
 
-            const deletedConfig = globalConfigs.find(config => config.id === id);
-            globalConfigs = globalConfigs.filter(config => config.id !== id);
-            showMessageBox("Success", "Global configuration deleted from this session.");
-            loadGlobalConfigs();
-
-            if (deletedConfig) {
-                const removedDivId = `global-${deletedConfig.globalGroupName.replace(/\s+/g, '_').toUpperCase()}`; // Consistent ID generation
-                const elementToRemove = document.getElementById(removedDivId);
-                if (elementToRemove) {
-                    elementToRemove.remove();
+                if (deletedConfig) {
+                    const removedDivId = `G.${deletedConfig.globalGroupName.replace(/\s+/g, '_').toUpperCase()}`; // Consistent ID generation
+                    const elementToRemove = document.getElementById(removedDivId);
+                    if (elementToRemove) {
+                        elementToRemove.remove();
+                        console.log(`Removed global block HTML element: ${removedDivId}`); // Debug log
+                    }
+                    globalGroupStatusBlocks = globalGroupStatusBlocks.filter(block => block.id !== `G.${deletedConfig.globalGroupName.replace(/\s+/g, '_').toUpperCase()}`); // Use consistent ID for filtering
+                    renderDashboard();
+                    console.log(`Global group status blocks updated. Re-rendering dashboard.`); // Debug log
                 }
-                globalGroupStatusBlocks = globalGroupStatusBlocks.filter(block => block.id !== `G.${deletedConfig.globalGroupName.replace(/\s+/g, '_').toUpperCase()}`); // Use consistent ID for filtering
-                renderDashboard();
-            }
+            });
         }
         window.deleteGlobalConfig = deleteGlobalConfig;
 
-        function showMessageBox(title, message) {
+        /**
+         * Displays a custom message box instead of alert/confirm.
+         * @param {string} title - The title of the message box.
+         * @param {string} message - The content message.
+         * @param {boolean} isConfirm - If true, adds a 'Cancel' button and expects a callback.
+         * @param {function} onConfirmCallback - Callback function to execute if 'OK' is clicked in a confirm box.
+         */
+        function showMessageBox(title, message, isConfirm = false, onConfirmCallback = null) {
+            console.log(`Displaying message box: Title='${title}', Message='${message}', IsConfirm=${isConfirm}`); // Debug log
             const msgBox = document.getElementById('messageBox');
-            document.getElementById('messageBoxTitle').textContent = title;
-            document.getElementById('messageBoxContent').textContent = message;
-            msgBox.classList.add('show');
-            setTimeout(() => {
+            const msgBoxTitle = document.getElementById('messageBoxTitle');
+            const msgBoxContent = document.getElementById('messageBoxContent');
+            const okButton = msgBox.querySelector('button'); // Get the existing OK button
+            let cancelButton = msgBox.querySelector('.cancel-button'); // Check if a cancel button already exists
+
+            msgBoxTitle.textContent = title;
+            msgBoxContent.textContent = message;
+
+            // Reset buttons
+            okButton.textContent = 'OK';
+            okButton.onclick = () => {
                 msgBox.classList.remove('show');
-            }, 3000); // Hide after 3 seconds
+                console.log("Message box hidden."); // Debug log
+            };
+
+            if (cancelButton) {
+                cancelButton.remove(); // Remove existing cancel button if any
+            }
+
+            if (isConfirm) {
+                okButton.onclick = () => {
+                    msgBox.classList.remove('show');
+                    if (onConfirmCallback) {
+                        onConfirmCallback();
+                    }
+                    console.log("Message box confirmed and hidden."); // Debug log
+                };
+
+                cancelButton = document.createElement('button');
+                cancelButton.textContent = 'Cancel';
+                cancelButton.className = 'cancel-button bg-gray-500 hover:bg-gray-600 text-white p-2 rounded-md cursor-pointer transition';
+                cancelButton.onclick = () => {
+                    msgBox.classList.remove('show');
+                    console.log("Message box cancelled and hidden."); // Debug log
+                };
+                okButton.parentNode.insertBefore(cancelButton, okButton.nextSibling); // Insert cancel button after OK button
+            }
+
+            msgBox.classList.add('show');
+            // For simple messages, auto-hide after 3 seconds, unless it's a confirm box
+            if (!isConfirm) {
+                setTimeout(() => {
+                    msgBox.classList.remove('show');
+                    console.log("Message box auto-hidden."); // Debug log
+                }, 3000);
+            }
         }
         window.showMessageBox = showMessageBox;
 
+
+        // Function to parse URL query parameters
+        function getQueryParams() {
+            const params = {};
+            window.location.search.substring(1).split('&').forEach(param => {
+                const parts = param.split('=');
+                if (parts.length === 2) {
+                    params[decodeURIComponent(parts[0])] = decodeURIComponent(parts[1]);
+                }
+            });
+            return params;
+        }
+
         // Function to update all channel and global statuses (initial poll, then rely on WS)
         async function updateAllStatuses() {
-            console.log('Starting initial UI status update from backend.');
+            console.log('Starting initial UI status update from backend.'); // Debug log
             await fetchAllAlarmsFromBackend(); // Get all current alarms from ES via Flask
-            
+
             // Re-render blocks based on fetched active alarms
-            document.querySelectorAll('.device-status[data-frontend-block-id], .global-status-block[data-frontend-block-id]').forEach(element => {
-                let idToMatch = element.getAttribute('data-frontend-block-id');
+            document.querySelectorAll('.device-status[data-frontend-block-id]').forEach(element => { // Exclude global blocks from this loop, they are handled by updateGlobalBlockLogic
+                let idToMatch = normalizeFrontendBlockId(element.getAttribute('data-frontend-block-id'));
+
                 let highestSeverityForBlock = 'OK'; // Default to OK
                 let latestAlarmForBlock = null;
 
                 // Find the highest severity alarm for this specific block from the fetched activeAlarms map
+                // Alarms in activeAlarms are already normalized (e.g., C.0104)
                 activeAlarms.forEach(alarm => {
+                    // Check only frontend_block_id for channel blocks here
                     if (alarm.frontend_block_id === idToMatch) {
                         if (!latestAlarmForBlock || SEVERITY_ORDER[alarm.severity.toUpperCase()] > SEVERITY_ORDER[latestAlarmForBlock.severity.toUpperCase()]) {
                             latestAlarmForBlock = alarm; // Keep the highest severity alarm
                         }
                     }
                 });
+                console.log(`updateAllStatuses: Checking block ${idToMatch}. Found alarm:`, latestAlarmForBlock ? `ID: ${latestAlarmForBlock.frontend_block_id || latestAlarmForBlock.group_id}, Severity: ${latestAlarmForBlock.severity}, Message: ${latestAlarmForBlock.message}` : 'None'); // Debug log
 
                 const deviceId = element.dataset.deviceId;
                 const deviceBlueprint = channelDevicesBlueprint.find(d => d.id === deviceId);
                 const isPgmBlock = deviceBlueprint && deviceBlueprint.isPgm;
-                const channelNum = element.dataset.channelNum;
-                // For the main channel name, still use the channelNamesMap
-                const channelNameForHeading = channelNamesMap.get(String(channelNum).padStart(2, '0')) || `Channel ${String(channelNum).padStart(2, '0')}`;
-
+                const channelNum = parseInt(element.dataset.channelNum, 10); // Get as number
 
                 if (latestAlarmForBlock) {
                     highestSeverityForBlock = latestAlarmForBlock.severity;
@@ -1611,44 +1898,71 @@
                                 latestAlarmForBlock.pgm_dest,
                                 latestAlarmForBlock.polled_value,
                                 latestAlarmForBlock.expected_value,
-                                latestAlarmForBlock.router_source, // This is the source_name from consumer
-                                channelNum
+                                latestAlarmForBlock.router_source,
+                                channelNum // Pass raw channel number
                             );
+                            console.log(`updateAllStatuses: PGM block ${idToMatch} (alarmed) content updated.`); // Debug log
                         } else {
                             // Alarm is not PGM mismatch, or it's OK/INFO status for a PGM block, revert to config display
-                            const pgmConfig = pgmRoutingMap.get(idToMatch);
+                            let pgmConfig = pgmRoutingMap.get(idToMatch); // Use normalized ID here
+                            pgmConfig = pgmConfig || {}; // Ensure pgmConfig is an object even if not found
+
                             element.innerHTML = `<div class="text-xs font-bold">${pgmConfig?.router_source || 'Router N/A'} - ${pgmConfig?.pgm_dest || 'Dest N/A'}</div>
-                                                <div class="text-xs">${pgmConfig?.channel_name || 'Channel N/A'}</div>`; // Use pgmConfig.channel_name
+                                                <div class="text-xs">${pgmConfig?.channel_name || `Channel ${String(channelNum).padStart(2, '0')}`}</div>`;
+                            console.log(`updateAllStatuses: PGM block ${idToMatch} (not PGM mismatch alarm) content reset to config.`); // Debug log
                         }
+                    } else {
+                        console.log(`updateAllStatuses: Non-PGM block ${idToMatch} has alarm, status updated.`); // Debug log
                     }
                 } else {
                     // If no active alarm for this block, ensure it's OK and display initial content
                     updateStatusBlockFromWS(element, 'OK', 'OK');
-                    
+                    console.log(`updateAllStatuses: Block ${idToMatch} has no active alarms. Setting to OK.`); // Debug log
+
                     if (isPgmBlock) {
-                        const pgmConfig = pgmRoutingMap.get(idToMatch);
+                        let pgmConfig = pgmRoutingMap.get(idToMatch); // Use normalized ID here
+                        pgmConfig = pgmConfig || {}; // Ensure pgmConfig is an object even if not found
+
                         element.innerHTML = `<div class="text-xs font-bold">${pgmConfig?.router_source || 'Router N/A'} - ${pgmConfig?.pgm_dest || 'Dest N/A'}</div>
-                                            <div class="text-xs">${pgmConfig?.channel_name || 'Channel N/A'}</div>`; // Use pgmConfig.channel_name
-                    } else if (deviceBlueprint) {
-                        element.innerHTML = `<div>${deviceBlueprint.name}</div>`;
+                                            <div class="text-xs">${pgmConfig?.channel_name || `Channel ${String(channelNum).padStart(2, '0')}`}</div>`;
+                        console.log(`updateAllStatuses: PGM block ${idToMatch} (no alarm) content reset to config.`); // Debug log
+                    } else if (element.dataset.frontendBlockId.startsWith('C.')) { // Only update content for channel blocks
+                        // For regular channel devices (not global blocks) ensure display text is correct
+                        if (deviceBlueprint) {
+                             element.innerHTML = `<div>${deviceBlueprint.name}</div>`;
+                        }
+                        console.log(`updateAllStatuses: Non-PGM channel block ${idToMatch} (no alarm) content reset to blueprint name.`); // Debug log
                     }
                     // For global blocks, content is fixed (name, IP) so no need to change here as per original
                 }
             });
-            console.log('Initial UI status update complete.');
+            // NEW: After all individual blocks are processed, re-evaluate global blocks based on children
+            globalGroupStatusBlocks.forEach(groupBlock => {
+                updateGlobalBlockLogic(groupBlock.id);
+            });
+
+            console.log('Initial UI status update complete.'); // Debug log
         }
 
 
         // Initialize the dashboard when the window loads
         window.onload = function() {
+            console.log("Window loaded. Initializing dashboard."); // Debug log
             renderDashboard(); // Render static elements, then poll for initial statuses
             populateDeviceGroupDropdowns();
             connectWebSocket(); // Establish WebSocket connection
+
+            const queryParams = getQueryParams();
+            const initialView = queryParams.view || 'dashboard'; // Default to 'dashboard' if no view param
+
+            // Ensure the correct view is shown based on URL parameter
+            showView(initialView); // Call showView with the determined initial view
+
             // Polling interval is reduced significantly now as WS provides real-time updates.
             // This interval is for a full refresh from backend (Elasticsearch) to catch anything missed by WS,
             // or to ensure consistent state after page load.
             setInterval(updateAllStatuses, 60000); // Polls every 60 seconds (1 minute)
-            showView('dashboard'); // Show dashboard view by default
+            console.log("Dashboard initialization complete."); // Debug log
         };
     </script>
 </body>

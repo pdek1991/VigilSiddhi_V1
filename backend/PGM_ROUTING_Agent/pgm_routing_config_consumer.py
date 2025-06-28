@@ -9,8 +9,7 @@ import asyncio
 import aiohttp
 import uuid
 
-# Set logging level to DEBUG temporarily to get more verbose output
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s') # Changed to INFO for production readability
 
 # --- Configuration ---
 REDIS_HOST = os.environ.get('REDIS_HOST', '192.168.56.30')
@@ -25,8 +24,12 @@ REDIS_STREAM_NAME = "vs:agent:pgm_routing_status" # Must match agent's stream na
 CONSUMER_GROUP_NAME = "pgm_routing_es_ingester" # Unique group name for PGM routing consumer
 CONSUMER_NAME = "pgm_routing_consumer_instance_1" # Corrected consumer name to remove the dot, as per common practice and potential issues
 
-# Redis key prefix for storing PGM routing block states (per frontend block)
-ALARM_STATE_REDIS_PREFIX = "vs:alarm_state:pgm:"
+# Redis Hash name for storing PGM routing block states (full state per unique device)
+# Key: 'pgm_alarm_states_per_device' (Redis Hash name)
+# Field: f"{frontend_block_id}_{device_ip}" (e.g., 'C.102_192.168.1.10', 'G.COMPRESSION_M_172.19.180.72')
+# Value: JSON string of {"status": "ALARM", "severity": "CRITICAL", "message": "..."}
+PGM_ALARM_STATES_PER_DEVICE_KEY = "pgm_alarm_states_per_device"
+
 
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=False)
 es = Elasticsearch(f"http://{ES_HOST}:{ES_PORT}")
@@ -35,7 +38,8 @@ http_session = None
 async def send_websocket_notification(message_data):
     """Sends a JSON message to the WebSocket notifier's HTTP endpoint."""
     global http_session
-    if http_session is None:
+    if http_session is None or http_session.closed:
+        # Explicitly set ssl=False for the connector as the notifier is HTTP
         http_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False))
 
     try:
@@ -63,181 +67,175 @@ def setup_consumer_group():
     except Exception as e:
         logging.error(f"Unhandled error during consumer group setup: {e}", exc_info=True)
 
-def get_block_state_redis_key(device_ip, frontend_block_id):
-    """Generates a unique Redis key for a PGM routing block's overall status."""
-    # Ensure all components are strings and handle None values gracefully
-    dev_ip_str = str(device_ip) if device_ip is not None else "N/A"
-    block_id_str = str(frontend_block_id) if frontend_block_id is not None else "N/A"
-    return f"{ALARM_STATE_REDIS_PREFIX}block:{dev_ip_str}_{block_id_str}"
-
-def get_previous_block_severity(block_key):
-    """Retrieves the previous overall severity of a PGM routing block from Redis."""
-    try:
-        state = r.get(block_key)
-        if state:
-            return state.decode('utf-8')
-        return None
-    except Exception as e:
-        logging.error(f"Error getting previous block state from Redis for key {block_key}: {e}")
-        return None
-
-def set_current_block_severity(block_key, severity):
-    """Sets the current overall severity of a PGM routing block in Redis."""
-    try:
-        r.set(block_key, severity)
-        logging.debug(f"Set block state for {block_key} to {severity}")
-    except Exception as e:
-        logging.error(f"Error setting current block state in Redis for key {block_key}: {e}")
-
 async def process_message(message_id, payload):
     """Processes a single message from the Redis stream, indexes to ES, and sends WS notifications."""
     logging.debug(f"Processing message ID: {message_id.decode()}")
-    logging.debug(f"  Timestamp: {payload.get('timestamp')}")
-    logging.debug(f"  Agent Type: {payload.get('agent_type')}")
-    logging.debug(f"  Device IP: {payload.get('device_ip')}")
-    logging.debug(f"  Device Name: {payload.get('device_name')}")
-    logging.debug(f"  Frontend Block ID: {payload.get('frontend_block_id')}")
-    logging.debug(f"  Group Name: {payload.get('group_name')}")
-    logging.debug(f"  Status: {payload.get('status')}")
-    logging.debug(f"  Severity: {payload.get('severity')}")
-    logging.debug(f"  Message: {payload.get('message')}")
-    logging.debug("-" * 50)
+    logging.debug(f"  Payload: {json.dumps(payload, indent=2)}")
 
-    current_status = payload.get('status')
-    current_severity = payload.get('severity')
-    frontend_block_id = payload.get('frontend_block_id')
     device_ip = payload.get('device_ip')
+    device_name = payload.get('device_name')
+    frontend_block_id = payload.get('frontend_block_id')
+    
+    # These are the *actual* status/severity/message from the agent's poll
+    overall_status_from_agent = payload.get('status', 'UNKNOWN').upper() 
+    overall_severity_from_agent = payload.get('severity', 'UNKNOWN').upper() 
+    overall_message_from_agent = payload.get('message', 'No specific status message.')
     timestamp = payload.get('timestamp')
+    agent_type = payload.get('agent_type')
+    group_name = payload.get('group_name')
 
     pgm_dest_check = payload.get('details', {}).get('pgm_dest_check', {})
     api_errors = payload.get('details', {}).get('api_errors', [])
 
-    # Extract additional details for ES and WS
     polled_source = pgm_dest_check.get('polled_source', 'N/A')
     expected_source = pgm_dest_check.get('expected_source', 'N/A')
     source_name = pgm_dest_check.get('polled_source_name', 'N/A')
 
+    logging.info(f"  Device IP: {device_ip}, Status (Agent): {overall_status_from_agent}, Severity (Agent): {overall_severity_from_agent}, Frontend Block ID: {frontend_block_id}")
+
+
     # --- Alarm State Management for Frontend Notifications ---
-    block_state_key = get_block_state_redis_key(device_ip, frontend_block_id)
-    previous_block_severity = get_previous_block_severity(block_state_key)
-    logging.debug(f"Block state for {frontend_block_id} (IP: {device_ip}): Previous='{previous_block_severity}', Current='{current_severity}'")
+    # Construct a unique field for Redis state tracking for this specific device
+    device_state_field = f"{frontend_block_id}_{device_ip}"
+
+    # Fetch last known alarm state from Redis Hash using the unique device field
+    last_state_json = r.hget(PGM_ALARM_STATES_PER_DEVICE_KEY, device_state_field)
+    last_state = json.loads(last_state_json.decode('utf-8')) if last_state_json else None
+
+    # Determine if the current status constitutes an "alarming" state (not OK/INFO)
+    alarming_severities = ['CRITICAL', 'ERROR', 'WARNING', 'ALARM', 'MAJOR', 'MINOR']
+    
+    is_current_alarm_state = overall_severity_from_agent in alarming_severities
+    is_previous_alarm_state = False
+    if last_state:
+        is_previous_alarm_state = last_state.get('severity', 'UNKNOWN').upper() in alarming_severities
+
+    logging.debug(f"Block state for {device_state_field}: Previous Alarm='{is_previous_alarm_state}', Current Alarm='{is_current_alarm_state}'")
+    logging.debug(f"  Previous State: {last_state}")
 
 
     send_ws_notification = False
-    ws_severity = current_severity
-    ws_status = current_status
-    ws_message = payload.get('message')
+    ws_severity = overall_severity_from_agent
+    ws_status = overall_status_from_agent
+    ws_message = overall_message_from_agent
+    ws_type = "UNKNOWN" # Default type
 
-    # Logic to determine if a WebSocket notification needs to be sent and its type
-    # Normalize current and previous severity for robust comparison
-    normalized_current_severity = current_severity.upper() if current_severity else 'UNKNOWN'
-    normalized_previous_severity = previous_block_severity.upper() if previous_block_severity else 'UNKNOWN'
-
-    # Define what constitutes an "alarming" state for PGM routing
-    alarming_severities = ['CRITICAL', 'ERROR', 'WARNING', 'ALARM', 'MAJOR', 'MINOR']
-    
-    is_previous_alarm_state = normalized_previous_severity in alarming_severities
-    is_current_alarm_state = normalized_current_severity in alarming_severities
-
-    # Scenario 1: Alarm clears (was alarming, now OK/INFO/CLEARED)
-    if not is_current_alarm_state: # If current state is NOT an alarm (i.e., OK, INFO, CLEARED, UNKNOWN)
+    # Scenario 1: Alarm clears (was alarming, now OK/INFO)
+    if not is_current_alarm_state:
         if is_previous_alarm_state:
             # Block was previously in an alarm state and is now no longer alarming -> Send CLEAR notification
             send_ws_notification = True
-            ws_severity = "CLEARED" # Or "OK" as per frontend expectation
-            ws_status = "cleared"
-            ws_message = f"PGM Routing {payload.get('device_name')} (Block: {frontend_block_id}) is now OK."
-            logging.info(f"PGM block {frontend_block_id} for {device_ip} has CLEARED. Previous severity: {previous_block_severity}. Sending WS notification.")
+            ws_severity = "INFO" # Represent as INFO for cleared in frontend
+            ws_status = "CLEARED" # Specific status for cleared alarms
+            ws_message = f"PGM Routing for {device_name} (Block: {frontend_block_id}, IP: {device_ip}) is now OK. All previous alarms cleared."
+            ws_type = "ALARM_CLEARED"
+            logging.info(f"PGM block {device_state_field} has CLEARED. Previous severity: {last_state.get('severity')}. Sending WS notification.")
+            r.hdel(PGM_ALARM_STATES_PER_DEVICE_KEY, device_state_field) # Remove state from Redis
         else:
-            logging.debug(f"PGM block {frontend_block_id} for {device_ip} is OK/INFO and no previous alarm. Skipping WS notification.")
-        set_current_block_severity(block_state_key, 'OK') # Always update state to OK/INFO when not alarming
-    # Scenario 2: New alarm or severity change for an active alarm
-    elif is_current_alarm_state: # If current state IS an alarm
-        if not is_previous_alarm_state or normalized_previous_severity != normalized_current_severity:
-            # Send if it transitioned to an alarm, OR if existing alarm changed severity
+            logging.debug(f"PGM block {device_state_field} is OK/INFO and no previous alarm. Skipping WS notification.")
+            # No need to update state if it's already OK and remains OK, or was never an alarm
+            
+    # Scenario 2: New alarm or existing alarm changed severity/message
+    elif is_current_alarm_state:
+        if not is_previous_alarm_state:
+            # Transitioned from non-alarming to alarming -> New alarm
             send_ws_notification = True
-            logging.info(f"PGM block {frontend_block_id} for {device_ip} is in {current_severity} state. Previous: {previous_block_severity}. Sending WS notification.")
+            ws_type = "NEW_ALARM"
+            logging.info(f"NEW ALARM detected for {device_state_field}: {overall_severity_from_agent} - {overall_message_from_agent}. Sending WS notification.")
+        elif (overall_severity_from_agent != last_state.get('severity').upper() or 
+              overall_message_from_agent != last_state.get('message')):
+            # Existing alarm changed severity or message -> Update alarm
+            send_ws_notification = True
+            ws_type = "ALARM_UPDATE"
+            logging.info(f"ALARM UPDATED for {device_state_field}. Previous severity: {last_state.get('severity')}, Current: {overall_severity_from_agent}. Sending WS notification.")
         else:
-            logging.debug(f"PGM block {frontend_block_id} for {device_ip} is still {current_severity}. Severity not changed. Skipping WS notification.")
-        set_current_block_severity(block_state_key, current_severity) # Update state to current severity
+            logging.debug(f"PGM block {device_state_field} is still {overall_severity_from_agent}. Severity/Message not changed. Skipping WS notification.")
+        
+        # Always update state for active alarms
+        r.hset(PGM_ALARM_STATES_PER_DEVICE_KEY, device_state_field, json.dumps({
+            "status": overall_status_from_agent,
+            "severity": overall_severity_from_agent,
+            "message": overall_message_from_agent
+        }))
 
 
     # --- WebSocket Notification ---
     if send_ws_notification:
+        group_id = None
+        # Determine group_id based on group_name for WebSocket notification (similar to iLO consumer)
+        if group_name == "main": # Assuming agent sends 'main' or 'backup' as group_name for domain
+            group_id = "G.PGM_MAIN"
+        elif group_name == "backup":
+            group_id = "G.PGM_BACKUP"
+        
         websocket_message = {
-            "device_name": payload.get('device_name'),
+            "device_name": device_name,
             "ip": device_ip,
             "time": timestamp,
             "message": ws_message, # Use the message determined by state logic
             "severity": ws_severity, # Use the severity determined by state logic
             "status": ws_status, # Use the status determined by state logic (e.g., "cleared", "mismatch", "error")
             "frontend_block_id": frontend_block_id, # Always include frontend_block_id
-            "group_name": payload.get('group_name'),
+            "group_name": group_name,
+            "group_id": group_id, # Add group_id
+            "type": ws_type, # Type of notification (NEW_ALARM, ALARM_UPDATE, ALARM_CLEARED)
             "pgm_dest": pgm_dest_check.get('pgm_dest', 'N/A'),
             "polled_value": polled_source,
             "expected_value": expected_source,
             "router_source": source_name, # Send source_name as router_source to frontend
-            "oid": pgm_dest_check.get('oid', 'N/A') # Include OID if relevant
+            # OID IS EXPLICITLY REMOVED FROM WEBSOCKET MESSAGE
         }
         await send_websocket_notification(websocket_message)
 
 
     # --- Index to monitor_historical_alarms ---
     # Only index to Elasticsearch if the overall status is an active alarm.
-    # Cleared states are typically not indexed as new alarms, but you could add separate logic
-    # to log them as 'cleared events' in a different ES index if needed for audit trails.
-    if is_current_alarm_state: # Only index active alarms (WARNING, CRITICAL, etc.)
+    if is_current_alarm_state: 
         # Construct alarm message including polled, expected, and source_name values
-        alarm_doc_message = payload.get('message', 'No specific alarm message.') # Default to agent's message
+        alarm_doc_message = overall_message_from_agent # Start with agent's overall message
 
-        if pgm_dest_check and pgm_dest_check.get("status") in ["MISMATCH", "Error"]:
-            alarm_doc_message = (
-                f"PGM Routing Alarm - Destination: {pgm_dest_check.get('pgm_dest', 'N/A')}, "
-                f"Polled Source: '{polled_source}', Expected Source: '{expected_source}'"
-            )
-            if source_name and source_name != 'N/A':
-                alarm_doc_message += f", Source Name: '{source_name}'"
-            if pgm_dest_check.get('oid'):
-                alarm_doc_message += f", OID: {pgm_dest_check.get('oid', 'N/A')}"
-            
-            # If the status from pgm_dest_check is "Error", it means SNMP polling itself had an issue
-            if pgm_dest_check.get("status") == "Error":
+        # Enhance message based on details, but exclude OID
+        if pgm_dest_check:
+            if pgm_dest_check.get("status") == "MISMATCH":
+                alarm_doc_message = (
+                    f"PGM Routing MISMATCH - Destination: {pgm_dest_check.get('pgm_dest', 'N/A')}, "
+                    f"Current: '{polled_source}', Expected: '{expected_source}'"
+                )
+                if source_name and source_name != 'N/A':
+                    alarm_doc_message += f", Source Name: '{source_name}'"
+            elif pgm_dest_check.get("status") == "Error": # SNMP polling error
                 alarm_doc_message = (
                     f"PGM Routing SNMP Error - Dest: {pgm_dest_check.get('pgm_dest', 'N/A')}, "
                     f"Message: {pgm_dest_check.get('message', 'N/A')}"
                 )
-                if pgm_dest_check.get('oid'):
-                    alarm_doc_message += f", OID: {pgm_dest_check.get('oid', 'N/A')}"
-
 
         alarm_doc = {
             "alarm_id": str(uuid.uuid4()),
             "timestamp": timestamp,
             "message": alarm_doc_message, # Use the detailed message for ES
-            "device_name": payload.get('device_name'),
+            "device_name": device_name,
             "block_id": frontend_block_id,
-            "severity": normalized_current_severity, # Use normalized severity
-            "status": current_status.upper(),
-            "type": payload.get('agent_type'),
+            "severity": overall_severity_from_agent, 
+            "status": overall_status_from_agent,
+            "type": agent_type,
             "device_ip": device_ip,
-            "group_name": payload.get('group_name'),
+            "group_name": group_name,
             "pgm_dest": pgm_dest_check.get('pgm_dest', 'N/A'),
             "polled_source": polled_source,
             "expected_source": expected_source,
         }
         if source_name and source_name != 'N/A':
             alarm_doc["source_name"] = source_name
-        if pgm_dest_check.get('oid'):
-            alarm_doc["oid"] = pgm_dest_check.get('oid')
+        # OID IS EXPLICITLY REMOVED FROM ELASTICSEARCH MESSAGE
 
 
         try:
             es.index(index="monitor_historical_alarms", document=alarm_doc)
-            logging.info(f"Indexed PGM routing alarm/error '{alarm_doc['alarm_id']}' for {device_ip} to Elasticsearch.")
+            logging.info(f"Indexed PGM routing alarm/error '{alarm_doc['alarm_id']}' for {device_ip} (Block: {frontend_block_id}) to Elasticsearch.")
         except Exception as e:
-            logging.error(f"Failed to index PGM routing alarm/error to Elasticsearch: {e}", exc_info=True)
+            logging.error(f"Failed to index PGM routing alarm/error to Elasticsearch for {device_ip} (Block: {frontend_block_id}): {e}", exc_info=True)
     else:
-        logging.info(f"Skipping Elasticsearch indexing for {device_ip} as status is 'ok' or non-alarming.")
+        logging.info(f"Skipping Elasticsearch indexing for {device_ip} (Block: {frontend_block_id}) as status is 'ok' or non-alarming.")
 
 
 async def consume_messages():
