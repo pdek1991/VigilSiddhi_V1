@@ -33,6 +33,15 @@ class MySQLManager:
             logging.error(f"Error while connecting to MySQL: {e}")
             self.connection = None # Ensure connection is None on failure
 
+    def reconnect(self):
+        """Forces a re-establishment of the MySQL database connection."""
+        self.close() # Close any existing connection first
+        self._connect() # Then establish a new one
+        if self.connection and self.connection.is_connected():
+            logging.info("MySQL connection successfully re-established.")
+        else:
+            logging.error("Failed to re-establish MySQL connection.")
+
     def _get_cursor(self):
         """Returns a cursor, attempting to reconnect if the connection is lost."""
         if not self.connection or not self.connection.is_connected():
@@ -48,6 +57,7 @@ class MySQLManager:
         """Closes the MySQL database connection."""
         if self.connection and self.connection.is_connected():
             self.connection.close()
+            self.connection = None # Set to None after closing
             logging.info("MySQL connection closed.")
 
     def _execute_query(self, query, params=None, fetch_one=False, fetch_all=False, commit=False):
@@ -340,3 +350,4 @@ class MySQLManager:
     def delete_playoutmv_config(self, config_id):
         query = "DELETE FROM playoutmv_configs WHERE id = %s"
         return self._execute_query(query, (config_id,), commit=True)
+

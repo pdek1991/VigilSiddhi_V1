@@ -381,6 +381,8 @@
     <header>
         <div class="left">
             <!-- Logo now uses GIF and fills available height without circular border -->
+            <!-- Ensure that '/static/logo.gif' is the correct path where your web server serves the logo. -->
+            <!-- If the logo is in the same folder as this HTML, use src="logo.gif". -->
             <img src="/static/logo.gif" alt="VigilSiddhi" onerror="this.onerror=null;this.src='https://placehold.co/80x80/63b3ed/ffffff?text=VigilSiddhi+Logo';">
         </div>
         <h1>Historical Alarms Overview</h1>
@@ -424,13 +426,10 @@
                 <label for="message">Message</label>
                 <input type="text" id="message" placeholder="Search Message">
             </div>
-            <div class="filter-group">
-                <label for="block_id">Block ID</label>
-                <input type="text" id="block_id" placeholder="C.0104, G.iloM etc.">
-            </div>
+            <!-- Removed Block ID filter group -->
         </div>
         <div class="action-buttons">
-            <button class="search-btn" onclick="applyFilters()">Search</button>
+            <button class="search-btn" onclick="applyFiltersAndFetch()">Search</button>
             <button class="clear-btn" onclick="clearFilters()">Clear Filters</button>
         </div>
     </div>
@@ -445,7 +444,7 @@
                 <th style="width: 150px;">Group Name</th>
                 <th style="width: 350px;">Message</th> <!-- Default larger width for message -->
                 <th style="width: 100px;">Severity</th>
-                <th style="width: 100px;">Block ID</th> <!-- NEW: Block ID Column -->
+                <!-- Removed Block ID Column Header -->
             </tr>
         </thead>
         <tbody></tbody>
@@ -462,6 +461,29 @@
         const alarmsPerPage = 100;
         let currentResizableColumn = null;
         let startX, startWidth;
+        const REFRESH_INTERVAL_MS = 60 * 1000; // 1 minute in milliseconds
+        let autoRefreshInterval; // To store the interval ID for clearing
+
+        /**
+         * Sets the default 'From Timestamp' to 12 hours ago and 'To Timestamp' to now.
+         */
+        function setDefaultTimeFilters() {
+            const now = new Date();
+            const twelveHoursAgo = new Date(now.getTime() - (12 * 60 * 60 * 1000));
+
+            // Format to 'YYYY-MM-DDTHH:MM' for datetime-local input
+            const formatDateTimeLocal = (date) => {
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                return `${year}-${month}-${day}T${hours}:${minutes}`;
+            };
+
+            document.getElementById('from_timestamp').value = formatDateTimeLocal(twelveHoursAgo);
+            document.getElementById('to_timestamp').value = formatDateTimeLocal(now);
+        }
 
         /**
          * Initializes column resizing functionality.
@@ -519,24 +541,27 @@
         /**
          * Fetches historical alarm data from the backend API.
          * Populates filters, renders summary cards, and renders the table upon successful fetch.
+         * @param {boolean} applyCurrentFilters - If true, apply current UI filter values after fetching new data.
          */
-        async function fetchData() {
+        async function fetchData(applyCurrentFilters = false) {
             try {
                 const tbody = document.querySelector("#results tbody");
-                tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-gray-500">Loading alarms...</td></tr>'; // Increased colspan
+                // Adjusted colspan to 7 as Block ID column is removed
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-500">Loading alarms...</td></tr>';
                 document.getElementById('pagination-controls').innerHTML = ''; // Clear pagination on load
-
-                const queryParams = new URLSearchParams(window.location.search);
-                const blockIdFromUrl = queryParams.get('block_id');
                 
                 const fetchBody = {};
-                if (blockIdFromUrl) {
-                    fetchBody.block_id = blockIdFromUrl;
-                    // Pre-fill the block ID filter if coming from a dashboard block click
-                    document.getElementById('block_id').value = blockIdFromUrl;
+                // Use current values from filter inputs for fetchBody
+                const fromTimestamp = document.getElementById('from_timestamp').value;
+                const toTimestamp = document.getElementById('to_timestamp').value;
+
+                if (fromTimestamp) {
+                    fetchBody.from_timestamp = new Date(fromTimestamp).toISOString();
+                }
+                if (toTimestamp) {
+                    fetchBody.to_timestamp = new Date(toTimestamp).toISOString();
                 }
 
-                // Changed to call /api/get_alarms as per test_main.py's endpoint
                 const response = await fetch("/api/v1/get_alarm_history", {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -551,11 +576,19 @@
                 }
 
                 allData = data.hits; // The backend now returns { "hits": [...] }
-                filteredData = allData; // Initially, filtered data is all data
+                
+                if (applyCurrentFilters) {
+                    // If triggered by search button, apply filters to newly fetched data
+                    _applyFiltersInternal();
+                } else {
+                    // For initial load or auto-refresh, display all new data
+                    filteredData = allData;
+                }
+
                 currentPage = 1; // Reset to first page
-                renderSummaryCards(allData);
-                renderTable(filteredData);
-                populateFilters(allData);
+                renderSummaryCards(allData); // Summary cards always reflect ALL fetched data
+                renderTable(filteredData); // Table reflects filtered data
+                populateFilters(allData); // Populate datalists from ALL fetched data
                 setupResizableColumns();
             }
             catch (err) {
@@ -578,7 +611,8 @@
             };
 
             data.forEach(hit => {
-                const sev = (hit._source.severity || '').toLowerCase();
+                const s = hit._source;
+                const sev = (s.severity || '').toLowerCase();
                 if (["critical", "error"].includes(sev)) {
                     counts.critical++;
                 } else if (["warning", "major", "minor"].includes(sev)) {
@@ -622,24 +656,33 @@
             document.getElementById('message').value = '';
             document.getElementById('from_timestamp').value = '';
             document.getElementById('to_timestamp').value = '';
-            document.getElementById('block_id').value = ''; // Clear block ID filter
-
-            // Set the severity filter and apply
+            
+            // Set the severity filter and trigger fetch and filter
             document.getElementById('severity').value = severityType;
-            applyFilters();
+            applyFiltersAndFetch();
         }
 
         /**
-         * Applies filters based on user input and re-renders the table.
+         * Function to be called when "Search" button is clicked.
+         * It will first fetch new data, then apply the current filters.
          */
-        function applyFilters() {
+        function applyFiltersAndFetch() {
+            fetchData(true); // Pass true to indicate that filters should be applied after fetching
+        }
+
+        /**
+         * Internal function to apply filters to the currently loaded `allData`.
+         * This is separated so `fetchData` can call it after loading data,
+         * and it can also be called directly for client-side filtering changes
+         * without re-fetching (though for this app, we're always re-fetching for search).
+         */
+        function _applyFiltersInternal() {
             const filters = {
                 device_name: document.getElementById('device_name').value.toLowerCase(),
                 severity: document.getElementById('severity').value.toLowerCase(),
                 type: document.getElementById('type').value.toLowerCase(),
                 group_name: document.getElementById('group_name').value.toLowerCase(),
                 message: document.getElementById('message').value.toLowerCase(),
-                block_id: document.getElementById('block_id').value.toLowerCase(), // NEW: Block ID filter
                 from_timestamp: document.getElementById('from_timestamp').value,
                 to_timestamp: document.getElementById('to_timestamp').value
             };
@@ -666,7 +709,6 @@
                     (!filters.type || (s.type && s.type.toLowerCase().includes(filters.type))) &&
                     (!filters.group_name || (s.group_name && s.group_name.toLowerCase().includes(filters.group_name))) &&
                     (!filters.message || (s.message && s.message.toLowerCase().includes(filters.message))) &&
-                    (!filters.block_id || (s.frontend_block_id && s.frontend_block_id.toLowerCase().includes(filters.block_id)) || (s.block_id && s.block_id.toLowerCase().includes(filters.block_id))) && // NEW: Apply block_id filter, checking both
                     (!fromTime || timestamp >= fromTime) &&
                     (!toTime || timestamp <= toTime)
                 );
@@ -685,12 +727,10 @@
             document.getElementById('type').value = '';
             document.getElementById('group_name').value = '';
             document.getElementById('message').value = '';
-            document.getElementById('from_timestamp').value = '';
-            document.getElementById('to_timestamp').value = '';
-            document.getElementById('block_id').value = ''; // Clear block ID filter
-            filteredData = allData; // Reset filtered data to all data
+            setDefaultTimeFilters(); // Reset time filters to default (last 12 hours)
+            filteredData = allData; // Reset filtered data to all data (will be re-fetched on next interval anyway)
             currentPage = 1;
-            renderTable(filteredData);
+            fetchData(); // Fetch fresh data and re-render with default time filters
         }
 
         /**
@@ -737,7 +777,8 @@
             const paginatedData = data.slice(startIndex, endIndex);
 
             if (paginatedData.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-gray-500">No alarms found matching your criteria.</td></tr>'; // Increased colspan
+                // Adjusted colspan to 7 as Block ID column is removed
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-500">No alarms found matching your criteria.</td></tr>';
             } else {
                 tbody.innerHTML = paginatedData.map(hit => {
                     const s = hit._source;
@@ -766,7 +807,7 @@
                         <td data-label="Group Name">${safe(s.group_name)}</td>
                         <td data-label="Message">${safe(s.message)}</td>
                         <td data-label="Severity">${safe(s.severity)}</td>
-                        <td data-label="Block ID">${safe(s.frontend_block_id || s.block_id)}</td> <!-- NEW: Block ID column -->
+                        <!-- Removed Block ID data cell -->
                     </tr>`;
                 }).join('');
             }
@@ -853,7 +894,7 @@
                     pageNumButton.onclick = () => {
                         currentPage = i;
                         renderTable(filteredData);
-                    };
+                    }
                     paginationContainer.insertBefore(pageNumButton, nextButton);
                 }
             }
@@ -890,8 +931,13 @@
             }, 5000);
         }
 
+        // Initial setup for default time filters before fetching data
+        document.addEventListener('DOMContentLoaded', setDefaultTimeFilters);
         // Initial data fetch when the page loads
-        document.addEventListener('DOMContentLoaded', fetchData);
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchData(); // Initial fetch
+            autoRefreshInterval = setInterval(fetchData, REFRESH_INTERVAL_MS); // Start auto-refresh
+        });
     </script>
 </body>
 </html>

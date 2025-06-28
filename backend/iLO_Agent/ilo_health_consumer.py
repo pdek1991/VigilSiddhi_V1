@@ -41,11 +41,16 @@ es = Elasticsearch(f"http://{ES_HOST}:{ES_PORT}")
 # Async HTTP session for WebSocket notifier communication
 http_session = None
 
-# --- Local state management for frontend block alarms ---
-# This dictionary will store the last known status and details for each frontend_block_id
-# to prevent sending redundant notifications and to detect alarm clearing.
-# Format: { "frontend_block_id": {"status": "OK", "severity": "INFO", "message": "..."} }
-last_known_states = {}
+# --- Persistent state management for frontend block alarms using Redis Hash ---
+# This Redis Hash will store the last known *alarm* state for each unique device.
+# The key for the hash will now be a combination of frontend_block_id and device_ip
+# to ensure unique state tracking per physical device, even if frontend_block_id is shared.
+# Only non-OK states (ALARM, ERROR, WARNING, CRITICAL, FATAL) will be stored.
+# If a device transitions to OK, its entry will be removed from this hash.
+# Key: 'ilo_alarm_states_per_device' (Redis Hash name)
+# Field: f"{frontend_block_id}_{device_ip}" (e.g., 'C.102_192.168.1.10', 'G.COMPRESSION_M_172.19.180.72')
+# Value: JSON string of {"status": "ALARM", "severity": "CRITICAL", "message": "..."}
+REDIS_ALARM_STATE_KEY = "ilo_alarm_states_per_device"
 
 async def send_websocket_notification(message_data):
     """Sends a JSON message to the WebSocket notifier's HTTP endpoint."""
@@ -81,32 +86,34 @@ def setup_consumer_group():
             logging.error(f"Unhandled error during consumer group setup for {stream_name}: {e}", exc_info=True)
 
 async def process_message(stream_name, message_id, payload):
-    """Processes a single message from the Redis stream, indexes to ES, and sends WS notifications based on state changes."""
+    """
+    Processes a single message from the Redis stream, indexes to ES, and sends WS notifications
+    based on state changes, maintaining persistent state in Redis Hash.
+    """
     logging.info(f"Processing message ID: {message_id.decode()} from stream: {stream_name}")
-    
+
     device_ip = payload.get('device_ip')
     device_name = payload.get('device_name')
-    frontend_block_id = payload.get('frontend_block_id') # Extract frontend_block_id
-    overall_status = payload.get('status').upper() # Ensure status is uppercase for consistent comparison
-    overall_severity = payload.get('severity').upper() # Ensure severity is uppercase
-    overall_message = payload.get('message')
+    frontend_block_id = payload.get('frontend_block_id')
+    overall_status = payload.get('status', 'UNKNOWN').upper() # Ensure status is uppercase
+    overall_severity = payload.get('severity', 'UNKNOWN').upper() # Ensure severity is uppercase
+    overall_message = payload.get('message', 'No specific status message.')
     timestamp = payload.get('timestamp')
     agent_type = payload.get('agent_type')
-    group_name = payload.get('group_name') # Retrieve the group_name
+    group_name = payload.get('group_name')
 
     logging.info(f"  Device IP: {device_ip}, Status: {overall_status}, Severity: {overall_severity}, Group: {group_name}, Frontend Block ID: {frontend_block_id}")
 
-    # Retrieve the last known state for this frontend_block_id
-    # Default to an 'OK' state if not seen before.
-    last_state = last_known_states.get(frontend_block_id, {
-        "status": "OK",
-        "severity": "INFO",
-        "message": ""
-    })
+    # Construct a unique key for Redis state tracking for this specific device
+    device_state_key = f"{frontend_block_id}_{device_ip}"
+
+    # Fetch last known alarm state from Redis Hash using the unique device key
+    last_state_json = r.hget(REDIS_ALARM_STATE_KEY, device_state_key)
+    last_state = json.loads(last_state_json.decode('utf-8')) if last_state_json else None
 
     # Determine if the new status constitutes an alarm (not 'OK')
-    current_is_alarm = overall_status in ["ALARM", "ERROR", "WARNING"]
-    last_was_alarm = last_state["status"] in ["ALARM", "ERROR", "WARNING"]
+    current_is_alarm = overall_status in ["ALARM", "ERROR", "WARNING", "CRITICAL", "FATAL"]
+    last_was_alarm = last_state is not None
 
     # --- Index to monitor_historical_alarms ---
     # Only index to Elasticsearch if the status is an alarm (NOT 'OK')
@@ -120,7 +127,7 @@ async def process_message(stream_name, message_id, payload):
             "alarm_id": str(uuid.uuid4()),
             "timestamp": timestamp,
             "device_name": device_name,
-            "block_id": frontend_block_id, # Use frontend_block_id as the device ID
+            "block_id": frontend_block_id, # Keep frontend_block_id here as it comes from agent
             "severity": overall_severity,
             "status": overall_status,
             "type": agent_type,
@@ -133,14 +140,14 @@ async def process_message(stream_name, message_id, payload):
                 "api_errors": api_errors
             }
         }
-        
+
         try:
             es.index(index="monitor_historical_alarms", document=alarm_doc)
-            logging.info(f"Indexed iLO health alarm '{alarm_doc['alarm_id']}' for {frontend_block_id} (Group: {group_name}) to Elasticsearch.")
+            logging.info(f"Indexed iLO health alarm '{alarm_doc['alarm_id']}' for {frontend_block_id} (IP: {device_ip}, Group: {group_name}) to Elasticsearch.")
         except Exception as e:
-            logging.error(f"Failed to index iLO health alarm to Elasticsearch for {frontend_block_id}: {e}", exc_info=True)
+            logging.error(f"Failed to index iLO health alarm to Elasticsearch for {frontend_block_id} (IP: {device_ip}): {e}", exc_info=True)
     else:
-        logging.info(f"Skipping Elasticsearch indexing for {frontend_block_id} as status is 'OK'.")
+        logging.info(f"Skipping Elasticsearch indexing for {frontend_block_id} (IP: {device_ip}) as status is 'OK'.")
 
 
     # --- WebSocket Notification Logic ---
@@ -159,9 +166,9 @@ async def process_message(stream_name, message_id, payload):
     elif group_name == "Compression B":
         group_id = "G.COMPRESSION_B"
 
-    # Scenario 1: Transition from OK to Alarm state
+    # Scenario 1: New alarm detected (transition from OK/No state to Alarm)
     if current_is_alarm and not last_was_alarm:
-        logging.info(f"New alarm detected for {frontend_block_id}: {overall_status} - {overall_message}")
+        logging.info(f"NEW ALARM detected for {frontend_block_id} (IP: {device_ip}): {overall_status} - {overall_message}")
         websocket_message = {
             "device_name": device_name,
             "ip": device_ip,
@@ -170,15 +177,22 @@ async def process_message(stream_name, message_id, payload):
             "severity": overall_severity,
             "group_name": group_name,
             "frontend_block_id": frontend_block_id,
-            "group_id": group_id
+            "group_id": group_id,
+            "type": "NEW_ALARM"
         }
-    # Scenario 2: Ongoing alarm state, check if message or severity changed
+        # Store the current alarm state in Redis using the unique device key
+        r.hset(REDIS_ALARM_STATE_KEY, device_state_key, json.dumps({
+            "status": overall_status,
+            "severity": overall_severity,
+            "message": overall_message
+        }))
+    # Scenario 2: Ongoing alarm, check if message or severity changed
     elif current_is_alarm and last_was_alarm:
         if (overall_status != last_state["status"] or
             overall_severity != last_state["severity"] or
             overall_message != last_state["message"]):
-            
-            logging.info(f"Alarm details changed for {frontend_block_id}. Sending update: {overall_status} - {overall_message}")
+
+            logging.info(f"ALARM UPDATED for {frontend_block_id} (IP: {device_ip}). Sending update: {overall_status} - {overall_message}")
             websocket_message = {
                 "device_name": device_name,
                 "ip": device_ip,
@@ -187,43 +201,46 @@ async def process_message(stream_name, message_id, payload):
                 "severity": overall_severity,
                 "group_name": group_name,
                 "frontend_block_id": frontend_block_id,
-                "group_id": group_id
+                "group_id": group_id,
+                "type": "ALARM_UPDATE"
             }
+            # Update the alarm state in Redis using the unique device key
+            r.hset(REDIS_ALARM_STATE_KEY, device_state_key, json.dumps({
+                "status": overall_status,
+                "severity": overall_severity,
+                "message": overall_message
+            }))
         else:
-            logging.info(f"Alarm for {frontend_block_id} is ongoing with no change. Skipping WebSocket notification.")
-    # Scenario 3: Transition from Alarm state to OK
+            logging.info(f"Alarm for {frontend_block_id} (IP: {device_ip}) is ongoing with no change. Skipping WebSocket notification.")
+    # Scenario 3: Alarm cleared (transition from Alarm to OK)
     elif not current_is_alarm and last_was_alarm:
-        logging.info(f"Alarm cleared for {frontend_block_id}. Sending 'OK cleared' notification.")
+        logging.info(f"ALARM CLEARED for {frontend_block_id} (IP: {device_ip}). Sending 'OK cleared' notification.")
         websocket_message = {
             "device_name": device_name,
             "ip": device_ip,
             "time": timestamp,
-            "message": f"iLO health for {device_name} ({device_ip}) is OK. All previous alarms cleared.",
+            "message": f"iLO health for {device_name} ({device_ip}) is now OK. All previous alarms cleared.",
             "severity": "INFO", # Always INFO for cleared messages
             "group_name": group_name,
             "frontend_block_id": frontend_block_id,
-            "group_id": group_id
+            "group_id": group_id,
+            "type": "ALARM_CLEARED"
         }
+        # Remove the cleared alarm from Redis state using the unique device key
+        r.hdel(REDIS_ALARM_STATE_KEY, device_state_key)
     # Scenario 4: Already OK and remains OK (do nothing, no notification needed)
     else:
-        logging.info(f"Status for {frontend_block_id} is OK and was already OK. Skipping WebSocket notification.")
+        logging.info(f"Status for {frontend_block_id} (IP: {device_ip}) is OK and was already OK. Skipping WebSocket notification.")
 
     # Send the WebSocket message if it was prepared
     if websocket_message:
         await send_websocket_notification(websocket_message)
-    
-    # Update the last known state for this frontend_block_id
-    last_known_states[frontend_block_id] = {
-        "status": overall_status,
-        "severity": overall_severity,
-        "message": overall_message
-    }
 
 
 async def consume_messages():
     """Main function to consume messages from Redis Streams."""
     logging.info(f"Starting Redis consumer for streams: {', '.join(REDIS_STREAM_NAMES)} with group '{CONSUMER_GROUP_NAME}'.")
-    
+
     # Initialize streams_to_read dictionary for xreadgroup
     streams_to_read = {stream_name: '>' for stream_name in REDIS_STREAM_NAMES}
 
@@ -250,9 +267,11 @@ async def consume_messages():
 
                         except json.JSONDecodeError as jde:
                             logging.error(f"JSON Decode Error for message {message_id.decode()} in {stream_name}: {jde}")
+                            # Acknowledge malformed messages to prevent reprocessing them endlessly
                             r.xack(stream_bytes, CONSUMER_GROUP_NAME, message_id)
                         except Exception as e:
                             logging.error(f"Error processing message {message_id.decode()} from {stream_name}: {e}", exc_info=True)
+                            # Acknowledge messages that cause processing errors to prevent reprocessing
                             r.xack(stream_bytes, CONSUMER_GROUP_NAME, message_id)
 
         except redis.exceptions.ConnectionError as e:

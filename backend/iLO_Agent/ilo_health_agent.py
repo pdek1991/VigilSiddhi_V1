@@ -35,7 +35,7 @@ REDIS_STREAM_MAP = {
     "Compression B": "vs:agent:enc_iloB_status", # New stream for Compression B
     "DEFAULT": "vs:agent:ilo_status" # For devices not explicitly mapped by device_name or group_name
 }
-POLLING_INTERVAL_SECONDS = 30 # Poll iLO configs every 5 minutes
+POLLING_INTERVAL_SECONDS = 30 # Poll iLO configs every 30 seconds
 
 # Initialize Redis and MySQL clients outside main
 r = None
@@ -59,6 +59,7 @@ async def initialize_clients():
 
     logging.info("Attempting to initialize MySQLManager.")
     try:
+        # Initialize MySQLManager with current credentials
         mysql_manager = MySQLManager(
             host=MYSQL_HOST,
             database=MYSQL_DATABASE,
@@ -93,9 +94,16 @@ async def fetch_and_publish_ilo_configs():
     """
     logging.info("Starting iLO Health Agent cycle.")
     
-    # Ensure MySQLManager is initialized and connected before fetching
-    if not mysql_manager or not mysql_manager.connection or not mysql_manager.connection.is_connected():
-        logging.error("MySQLManager not initialized or connected. Cannot fetch device IPs.")
+    # Force MySQL connection to re-establish to pick up latest credentials/data
+    if mysql_manager:
+        mysql_manager.reconnect()
+    else:
+        logging.error("MySQLManager not initialized. Cannot reconnect.")
+        return
+
+    # Ensure MySQLManager is initialized and connected after reconnect
+    if not mysql_manager.connection or not mysql_manager.connection.is_connected():
+        logging.error("MySQLManager not connected after reconnect attempt. Cannot fetch device IPs.")
         return
 
     device_ips_configs = mysql_manager.get_all_device_ips()
@@ -109,6 +117,9 @@ async def fetch_and_publish_ilo_configs():
         return
 
     logging.info(f"Found {len(device_ips_configs)} iLO device configurations in total from DB.")
+    # The next log line is very verbose, keeping it for debugging as per previous context
+    logging.info(f"Found {device_ips_configs} iLO device configurations in total from DB.")
+
 
     # Group configurations by IP address
     # This dictionary will store:
