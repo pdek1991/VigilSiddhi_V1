@@ -15,7 +15,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__))))
 from mysql_client import MySQLManager
 from kmx_api_client import kmx_api_client # Use the shared client instance
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s') # Set to DEBUG for more info
+# Set to INFO for less verbose logging in production
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Configuration ---
 MYSQL_HOST = os.environ.get('MYSQL_HOST', '192.168.56.30')
@@ -29,8 +30,6 @@ REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
 # Using the Redis stream name specified by the user
 REDIS_STREAM_NAME = "vs:agent:kmx_status"
 POLLING_INTERVAL_SECONDS = 300 # Poll KMX configs every 5 minutes
-# MAX_WORKERS is no longer directly used for ThreadPoolExecutor,
-# as we are switching to asyncio.gather for concurrent coroutines.
 
 # Initialize Redis and MySQL clients outside main to ensure they are set up once
 # and any immediate connection errors are caught at startup.
@@ -133,14 +132,12 @@ def get_overall_status_from_details(device_ip, active_alarms, api_errors):
                 alarm_message_parts.append(f"Device: {highest_severity_alarm['deviceName']}")
             if highest_severity_alarm.get('actualValue'):
                 alarm_message_parts.append(f"Value: {highest_severity_alarm['actualValue']}")
-            if highest_severity_alarm.get('severity') and highest_severity_alarm.get('severity') != 'normal':
-                alarm_message_parts.append(f"Severity: {highest_severity_alarm['severity']}")
-
-            # Construct message. If no specific parts, use a generic alarm message.
+            
+            # Construct message.
             if alarm_message_parts:
-                overall_message = f"Active Alarm: {'; '.join(alarm_message_parts)}. OID: {highest_severity_alarm.get('oid', 'N/A')}."
+                overall_message = f"{'; '.join(alarm_message_parts)}." 
             else:
-                overall_message = f"Active Alarm detected for {device_ip} (Severity: {highest_severity_alarm.get('severity', 'N/A')})."
+                overall_message = f"Alarm detected for {device_ip}." # Simpler generic message
 
             overall_severity = payload_severity # Set the final overall severity
 
@@ -154,6 +151,25 @@ async def fetch_and_publish_kmx_configs():
     """
     logging.info("Starting KMX Config Agent cycle.")
     logging.debug("DEBUG: Attempting to fetch KMX configurations from MySQL.")
+    
+    # --- IMPORTANT FIX: Reconnect MySQL to fetch latest data ---
+    # Only reconnect if the connection is actually closed or not established.
+    if mysql_manager and (not mysql_manager.connection or not mysql_manager.connection.is_connected()):
+        try:
+            mysql_manager.reconnect()
+            logging.info("Successfully reconnected to MySQL.")
+        except Exception as e:
+            logging.error(f"Failed to reconnect to MySQL: {e}. Cannot fetch KMX configurations.", exc_info=True)
+            return
+    elif not mysql_manager:
+        logging.error("MySQLManager not initialized. Cannot fetch KMX configurations.")
+        return
+    
+    # Ensure MySQLManager is initialized and connected after reconnect (or if it was already connected)
+    if not mysql_manager.connection or not mysql_manager.connection.is_connected():
+        logging.error("MySQLManager not connected after all attempts. Cannot fetch KMX configurations.")
+        return
+
     kmx_configs = mysql_manager.get_kmx_configs() # This is a synchronous call to MySQLManager
     
     if kmx_configs is None:
@@ -213,7 +229,7 @@ async def process_kmx_config(config):
         "agent_type": "kmx_config",
         "device_ip": kmx_ip,
         "device_name": description,
-        "frontend_block_id": f"KMX_CONFIG_{kmx_ip.replace('.', '_')}",
+        "frontend_block_id": "G.KMX", # Updated to a fixed value as requested
         "group_name": device_name_from_db,
         "message": overall_message,
         "severity": overall_severity,
@@ -243,7 +259,7 @@ if __name__ == "__main__":
         logging.debug("DEBUG: asyncio.run(main_agent()) called.")
         asyncio.run(main_agent()) # Run the main async function
     except KeyboardInterrupt:
-        logging.info("KMX Config Agent stopped by user (KeyboardInterrupt).")
+        logging.info("Consumer stopped by user (KeyboardInterrupt).")
         sys.exit(0)
     except Exception as e:
         logging.critical(f"KMX Config Agent terminated due to an unhandled error: {e}", exc_info=True)

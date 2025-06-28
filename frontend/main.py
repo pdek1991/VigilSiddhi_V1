@@ -4,6 +4,7 @@ import sys
 import os
 import logging
 from datetime import datetime
+import json # <--- ADDED: Import the json module
 
 # Configure logging for more visibility
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -208,52 +209,81 @@ def get_alarm_history():
         data = request.args
 
     # Extract all possible filter parameters
-    start_time_str = data.get('start_time')
-    end_time_str = data.get('end_time')
+    from_timestamp_str = data.get('from_timestamp')
+    to_timestamp_str = data.get('to_timestamp')
     device_name = data.get('device_name')
     channel_name = data.get('channel_name')
     group_name = data.get('group_name')
     agent_type = data.get('agent_type')
-    severity = data.get('severity') # New filter
-    message = data.get('message') # New filter
-    block_id = data.get('block_id') # New filter for specific dashboard blocks
+    severity = data.get('severity')
+    message = data.get('message')
+    block_id = data.get('block_id') # This is the key from the frontend
 
-
-    query_params = {}
-    if start_time_str:
-        query_params['start_time'] = start_time_str
-    if end_time_str:
-        query_params['end_time'] = end_time_str
+    # Initialize Elasticsearch query structure
+    es_query_body = {
+        "query": {
+            "bool": {
+                "must": []
+            }
+        },
+        "sort": [{"timestamp": {"order": "desc"}}],
+        "size": 1000 # Adjust size or implement pagination if needed
+    }
+    
+    # Add time range filter if provided
+    if from_timestamp_str or to_timestamp_str:
+        range_query = {"range": {"timestamp": {}}}
+        if from_timestamp_str:
+            range_query["range"]["timestamp"]["gte"] = from_timestamp_str
+        if to_timestamp_str:
+            range_query["range"]["timestamp"]["lte"] = to_timestamp_str
+        es_query_body["query"]["bool"]["must"].append(range_query)
+    
+    # Add other filters as match queries (case-insensitive where appropriate)
     if device_name:
-        query_params['device_name'] = device_name
+        es_query_body["query"]["bool"]["must"].append({"match": {"device_name": device_name}})
     if channel_name:
-        query_params['channel_name'] = channel_name
+        es_query_body["query"]["bool"]["must"].append({"match": {"channel_name": channel_name}})
     if group_name:
-        query_params['group_name'] = group_name
+        es_query_body["query"]["bool"]["must"].append({"match": {"group_name": group_name}})
     if agent_type:
-        query_params['agent_type'] = agent_type
+        es_query_body["query"]["bool"]["must"].append({"match": {"type": agent_type}}) # 'type' field in ES document
     if severity:
-        query_params['severity'] = severity
+        es_query_body["query"]["bool"]["must"].append({"match": {"severity": severity}})
     if message:
-        query_params['message'] = message
-    if block_id:
-        # Use 'frontend_block_id' if available, otherwise fallback to 'block_id'
-        # The Elasticsearch document might have it stored as 'block_id' or 'frontend_block_id'
-        query_params['block_id'] = block_id 
+        es_query_body["query"]["bool"]["must"].append({"match": {"message": message}})
 
+    # Block ID filter logic
+    if block_id:
+        # The frontend block_id can be 'C.XXYY' (channel block) or 'G.BLOCKNAME' (global block)
+        # It needs to match either 'frontend_block_id.keyword' or 'group_id.keyword' in Elasticsearch.
+        es_query_body["query"]["bool"]["must"].append({
+            "bool": {
+                "should": [
+                    {"term": {"frontend_block_id.keyword": block_id.lower()}}, # Use .keyword for exact match
+                    {"term": {"group_id.keyword": block_id.lower()}} # Use .keyword for exact match
+                ],
+                "minimum_should_match": 1 # At least one of the 'should' clauses must match
+            }
+        })
+        logging.info(f"Applying block_id filter: {block_id} to ES query.")
+    
+    logging.info(f"Executing ES historical alarm query: {json.dumps(es_query_body)}")
 
     try:
-        # Call ElasticsearchManager to fetch historical alarms with filters
-        # Assuming ElasticManager has a method like 'fetch_historical_alarms'
-        historical_alarms = es_manager.fetch_historical_alarms(query_params)
+        # Execute the search query directly using the Elasticsearch client instance
+        response = es_manager.es.search(index="monitor_historical_alarms", body=es_query_body)
         
-        # The frontend expects a 'hits' structure for the alarm console fullscreen
-        # Reformat the response to match the expected 'hits' structure
+        # Extract hits and total from the Elasticsearch response
+        historical_alarms_hits = response.get('hits', {}).get('hits', [])
+        total_hits_value = response.get('hits', {}).get('total', {}).get('value', 0)
+
+        # Reformat the response to match the expected 'hits' structure for the frontend
         formatted_alarms = {
             "hits": [
-                {"_source": alarm} for alarm in historical_alarms
+                {"_source": hit.get('_source')} for hit in historical_alarms_hits
             ],
-            "total": {"value": len(historical_alarms), "relation": "eq"}
+            "total": {"value": total_hits_value, "relation": "eq"} # "eq" for exact total
         }
         return jsonify(formatted_alarms), 200
     except Exception as e:
@@ -264,4 +294,3 @@ if __name__ == '__main__':
     # Flask will now automatically look for 'templates/' and 'static/' relative to main.py
     # Ensure your project structure matches this expectation.
     app.run(debug=True, host='0.0.0.0', port=5000)
-

@@ -1389,11 +1389,18 @@
             }
         }
 
-        // Function to open a new window with the full alarm console
+        /**
+         * Opens a new window with the full alarm console, optionally filtering by a block ID.
+         * This function is called when a dashboard block (channel device or global group) is clicked.
+         * The filtering logic will reside on the alarm_console_fullscreen page itself.
+         * @param {string} [blockId] - The frontend_block_id (e.g., 'C.0104') or global block ID (e.g., 'G.KMX')
+         * to filter alarms by. If not provided, opens the full console without filters.
+         */
         function openFullAlarmConsole(blockId) {
             let url = '/alarm_console_fullscreen';
             if (blockId) {
-                // MODIFICATION: Normalize the blockId before passing to the full console
+                // Normalize the blockId before passing to the full console to ensure consistency.
+                // For 'C.' blocks (e.g., 'C.104'), it pads to 'C.0104'. For 'G.' blocks, it returns as is.
                 blockId = normalizeFrontendBlockId(blockId);
                 url += `?block_id=${blockId}`;
             }

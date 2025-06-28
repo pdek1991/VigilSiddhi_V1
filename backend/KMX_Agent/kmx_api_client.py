@@ -11,8 +11,12 @@ from pysnmp.hlapi.v1arch.asyncio import (
 from pysnmp.proto import rfc1902 # For Null object check
 import asyncio # Explicitly import asyncio for async operations if needed outside hlapi
 import re # NEW: Import the regex module
+import os # For environment variables
+import redis # For Redis caching
+import json # For JSON serialization
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s') # Set to DEBUG for more info
+# Set to INFO for less verbose logging in production
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class KMXAPIClient:
     """
@@ -30,10 +34,45 @@ class KMXAPIClient:
         40000: "unknown"
     }
 
+    # Redis configuration for disabled OIDs caching
+    REDIS_HOST = os.environ.get('REDIS_HOST', '192.168.56.30')
+    REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
+    DISABLED_OIDS_REDIS_KEY_PREFIX = "kmx:disabled_oids:" # Use device IP as suffix
+    DISABLED_OIDS_TTL_SECONDS = 24 * 60 * 60 # 24 hours TTL
+
     def __init__(self):
         # Initializing SnmpDispatcher. This instance will be reused across operations.
         self.snmp_dispatcher = SnmpDispatcher()
         logging.info("KMXAPIClient initialized with SnmpDispatcher.")
+
+        # Initialize Redis client for disabled OID caching
+        try:
+            self.redis_client = redis.Redis(host=self.REDIS_HOST, port=self.REDIS_PORT, db=0, decode_responses=True) # decode_responses=True for strings
+            self.redis_client.ping() # Test connection
+            logging.info(f"KMXAPIClient successfully connected to Redis at {self.REDIS_HOST}:{self.REDIS_PORT}.")
+        except redis.exceptions.ConnectionError as e:
+            logging.error(f"KMXAPIClient: Failed to connect to Redis for disabled OID caching at {self.REDIS_HOST}:{self.REDIS_PORT}. Error: {e}")
+            self.redis_client = None # Set to None if connection fails
+        except Exception as e:
+            logging.error(f"KMXAPIClient: Unexpected error during Redis connection test: {e}", exc_info=True)
+            self.redis_client = None
+
+
+        # Pre-compile regex patterns for performance
+        self.pgm_patterns_for_filtering = [
+            re.compile(r"PGM-B", re.IGNORECASE),
+            re.compile(r"PGM B", re.IGNORECASE),
+            re.compile(r"PGM_B", re.IGNORECASE),
+            re.compile(r"PGM.*BKP", re.IGNORECASE),
+            re.compile(r"PGM.* BKP", re.IGNORECASE),
+            re.compile(r"PGM.*B", re.IGNORECASE)
+        ]
+        self.suppress_pgm_patterns_in_actual_value = [
+            re.compile(r"PGM.*B", re.IGNORECASE),
+            re.compile(r"PGM-B", re.IGNORECASE),
+            re.compile(r"PGM.* BKP", re.IGNORECASE)
+        ]
+        logging.debug("DEBUG: KMXAPIClient regex patterns pre-compiled.")
 
 
     def _resolve_oid_name(self, oid):
@@ -134,71 +173,34 @@ class KMXAPIClient:
         
         logging.debug(f"DEBUG: filtered_snmp_data - Converted cleaned_base_oid_str to tuple: {base_oid_tuple}")
 
-        # --- New Logic: Identify Disabled Components from .21.3.1.2.1.6 branch ---
+        # --- New Logic: Identify Disabled Components from .21.3.1.2.1.6 branch (with Redis caching) ---
         input_status_base_oid_str = "1.3.6.1.4.1.3872.21.3.1.2.1.6"
-        try:
-            input_status_base_oid_tuple = tuple(int(x) for x in input_status_base_oid_str.split('.'))
-        except ValueError:
-            logging.error(f"Invalid input_status_base_oid_str format: '{input_status_base_oid_str}'. Must be dot-separated integers.")
-            # Do not return, continue with what's possible
-            input_status_base_oid_tuple = () # Empty tuple to prevent further errors
+        disabled_oids_redis_key = f"{self.DISABLED_OIDS_REDIS_KEY_PREFIX}{ip}"
 
-        if input_status_base_oid_tuple:
-            logging.info(f"Starting SNMP walk to identify disabled components for {ip} from base OID: {input_status_base_oid_str}")
-            current_input_status_oid_to_walk = ObjectIdentity(input_status_base_oid_tuple)
+        if self.redis_client:
+            try:
+                cached_disabled_oids = self.redis_client.get(disabled_oids_redis_key)
+                if cached_disabled_oids:
+                    disabled_component_ids = set(json.loads(cached_disabled_oids))
+                    logging.info(f"Loaded {len(disabled_component_ids)} disabled component IDs from Redis cache for {ip}.")
+                else:
+                    logging.info(f"No disabled component IDs found in Redis cache for {ip}. Performing SNMP walk.")
+                    await self._perform_disabled_oids_snmp_walk(ip, community, input_status_base_oid_str, disabled_component_ids)
+                    if disabled_component_ids:
+                        self.redis_client.setex(disabled_oids_redis_key, self.DISABLED_OIDS_TTL_SECONDS, json.dumps(list(disabled_component_ids)))
+                        logging.info(f"Cached {len(disabled_component_ids)} disabled component IDs to Redis for {ip} with TTL {self.DISABLED_OIDS_TTL_SECONDS}s.")
+            except redis.exceptions.ConnectionError as e:
+                logging.error(f"Redis connection error during disabled OID cache operation for {ip}: {e}. Falling back to SNMP walk.")
+                await self._perform_disabled_oids_snmp_walk(ip, community, input_status_base_oid_str, disabled_component_ids)
+            except Exception as e:
+                logging.error(f"Error accessing Redis cache for disabled OIDs for {ip}: {e}", exc_info=True)
+                await self._perform_disabled_oids_snmp_walk(ip, community, input_status_base_oid_str, disabled_component_ids)
+        else:
+            logging.warning(f"Redis client not initialized. Performing SNMP walk for disabled OIDs for {ip} without caching.")
+            await self._perform_disabled_oids_snmp_walk(ip, community, input_status_base_oid_str, disabled_component_ids)
 
-            while True:
-                errorIndication, errorStatus, errorIndex, varBinds = await next_cmd(
-                    self.snmp_dispatcher,
-                    CommunityData(community, mpModel=1),
-                    await UdpTransportTarget.create((ip, 161)),
-                    ObjectType(current_input_status_oid_to_walk),
-                    lexicographicalMode=True,
-                    timeout=5,
-                    retries=2
-                )
-
-                if errorIndication:
-                    logging.error(f"SNMP Walk Error for {ip} on input status branch: {errorIndication}")
-                    break
-                if errorStatus:
-                    logging.warning(f"SNMP Walk Status Error for {ip} on input status branch: {errorStatus.prettyPrint()}")
-                    break
-
-                if not varBinds:
-                    logging.debug(f"DEBUG: No more varBinds returned for input status walk, ending.")
-                    break
-
-                oid, value = varBinds[0]
-                full_polled_oid_tuple = oid.getOid().asTuple()
-
-                # Check if OID is within the input status branch
-                if not full_polled_oid_tuple[:len(input_status_base_oid_tuple)] == input_status_base_oid_tuple:
-                    logging.debug(f"DEBUG: OID {oid.prettyPrint()} is outside input status branch, stopping walk.")
-                    break
-                
-                try:
-                    child_id_parts = full_polled_oid_tuple[len(input_status_base_oid_tuple):]
-                    if child_id_parts:
-                        current_child_id = str(child_id_parts[0]) # Get the first element as the child ID
-                        current_input_status_specific_oid_tuple = input_status_base_oid_tuple + (int(current_child_id),)
-                        original_input_status_oid_str = f"{input_status_base_oid_str}.{current_child_id}"
-
-                        status_result = await self._get_snmp_value(ip, community, current_input_status_specific_oid_tuple, original_input_status_oid_str)
-                        # The interpreted value will be "disabled" if the raw value was -1 due to GSM_STATUS_MAP
-                        if status_result.get("interpreted") == "disabled": # THIS IS THE CHECK YOU ARE ASKING ABOUT
-                            disabled_component_ids.add(current_child_id)
-                            logging.debug(f"DEBUG: Identified disabled component: Child ID '{current_child_id}' (OID: {original_input_status_oid_str})")
-                        else:
-                            logging.debug(f"DEBUG: Component {current_child_id} is not disabled (Status: {status_result.get('interpreted')})")
-                    else:
-                        logging.warning(f"Warning: Could not extract child ID from OID {oid.prettyPrint()} for input status.")
-                except Exception as e:
-                    logging.warning(f"Error processing input status OID {oid.prettyPrint()}: {e}", exc_info=True)
-                
-                current_input_status_oid_to_walk = oid
-            logging.info(f"Found {len(disabled_component_ids)} disabled components for {ip}.")
-        # --- End New Logic ---
+        logging.info(f"Found {len(disabled_component_ids)} disabled components for {ip}.")
+        # --- End New Logic (with Redis caching) ---
 
 
         # --- Existing Alarm Processing Logic ---
@@ -300,21 +302,10 @@ class KMXAPIClient:
             actual_value = actual_value_result.get("value", "") # Get raw value for "source *" check
 
             # --- NEW: ALARM FILTERING/SUPPRESSION LOGIC (PREVENTS ADDING TO final_results) ---
-            # Define the PGM patterns for filtering (the ones that should be ignored if source* is present)
-            # Reusing the patterns for device name checks from the custom alarm logic.
-            pgm_patterns_for_filtering = [ 
-                r"PGM-B",
-                r"PGM B",
-                r"PGM_B",
-                r"PGM.*BKP", 
-                r"PGM.* BKP",
-                r"PGM.*B" 
-            ]
-            
             is_device_name_pgm_for_filtering = False
             if device_name:
-                for pattern in pgm_patterns_for_filtering:
-                    if re.search(pattern, device_name, re.IGNORECASE):
+                for pattern in self.pgm_patterns_for_filtering: # Use pre-compiled patterns
+                    if pattern.search(device_name):
                         is_device_name_pgm_for_filtering = True
                         break
             
@@ -329,35 +320,20 @@ class KMXAPIClient:
 
 
             # --- NEW ALARM CONDITION LOGIC (MODIFIED FURTHER, now applies only if not filtered above) ---
-            # Using regex patterns for more robust matching of PGM strings
-            pgm_patterns_for_device_name = [
-                r"PGM-B",
-                r"PGM B", # literal space
-                r"PGM_B",
-                r"PGM.*BKP", # PGM followed by any characters, then BKP
-                r"PGM.* BKP", # PGM followed by any characters, then space BKP
-                r"PGM.*B" # PGM followed by any characters, then B (to cover PGM32B etc.)
-            ]
-            
+            # Using pre-compiled regex patterns for more robust matching of PGM strings
             is_pgm_related_in_device_name = False
             if device_name:
-                for pattern in pgm_patterns_for_device_name:
-                    if re.search(pattern, device_name, re.IGNORECASE):
+                for pattern in self.pgm_patterns_for_filtering: # Use pre-compiled patterns
+                    if pattern.search(device_name):
                         is_pgm_related_in_device_name = True
                         break
 
             contains_source_star_in_actual_value = "source " in actual_value
 
-            # New suppression patterns for actual_value
-            suppress_pgm_patterns_in_actual_value = [
-                r"PGM.*B",
-                r"PGM-B",
-                r"PGM.* BKP"
-            ]
             actual_value_contains_suppress_pgm_keywords = False
             if actual_value:
-                for pattern in suppress_pgm_patterns_in_actual_value:
-                    if re.search(pattern, actual_value, re.IGNORECASE):
+                for pattern in self.suppress_pgm_patterns_in_actual_value: # Use pre-compiled patterns
+                    if pattern.search(actual_value):
                         actual_value_contains_suppress_pgm_keywords = True
                         break
 
@@ -382,14 +358,18 @@ class KMXAPIClient:
 
             if severity_result.get("value") != "10000": # Only process if not "normal" severity
                 special_alarm_message = None
+                
+                # --- UPDATED: "HCO" Device Name Special Handling ---
                 if device_name is not None and "HCO" in device_name:
-                    logging.debug(f"Skipping alarm for {ip} child ID {child_id_str} due to 'HCO' in device name: {device_name}")
-                    # Special check for "source 24;source 24" with "HCO"
-                    if actual_value == "source 24;source 24":
-                        special_alarm_message = "HCO is on input 2"
-                        logging.info(f"Special alarm detected for {ip}: {special_alarm_message}")
+                    if actual_value == "source 23;source 23":
+                        logging.info(f"Skipping alarm for {ip} child ID {child_id_str} due to 'HCO' in device name and actual value is 'source 23;source 23'.")
+                        continue # Skip this alarm as requested
                     else:
-                        continue # Skip if it's HCO but not the special "source 24" case
+                        # If HCO and not "source 23;source 23", then apply the special message
+                        special_alarm_message = "HCO is on input 2"
+                        logging.info(f"Special HCO alarm message applied for {ip}: {special_alarm_message}")
+                        # Do NOT continue here, allow the alarm to proceed with this special message
+                # --- END UPDATED "HCO" LOGIC ---
 
                 entry = {}
                 entry["severity"] = severity_result.get("interpreted", "N/A")
@@ -420,6 +400,71 @@ class KMXAPIClient:
         
         logging.info(f"Completed filtered SNMP walk for {ip}. Found {len(final_results)} active alarms.")
         return final_results
+
+    async def _perform_disabled_oids_snmp_walk(self, ip, community, input_status_base_oid_str, disabled_component_ids):
+        """
+        Helper method to perform the SNMP walk for disabled components.
+        Populates the disabled_component_ids set.
+        """
+        try:
+            input_status_base_oid_tuple = tuple(int(x) for x in input_status_base_oid_str.split('.'))
+        except ValueError:
+            logging.error(f"Invalid input_status_base_oid_str format: '{input_status_base_oid_str}'. Must be dot-separated integers.")
+            return
+
+        logging.info(f"Starting SNMP walk to identify disabled components for {ip} from base OID: {input_status_base_oid_str}")
+        current_input_status_oid_to_walk = ObjectIdentity(input_status_base_oid_tuple)
+
+        while True:
+            errorIndication, errorStatus, errorIndex, varBinds = await next_cmd(
+                self.snmp_dispatcher,
+                CommunityData(community, mpModel=1),
+                await UdpTransportTarget.create((ip, 161)),
+                ObjectType(current_input_status_oid_to_walk),
+                lexicographicalMode=True,
+                timeout=5,
+                retries=2
+            )
+
+            if errorIndication:
+                logging.error(f"SNMP Walk Error for {ip} on input status branch: {errorIndication}")
+                break
+            if errorStatus:
+                logging.warning(f"SNMP Walk Status Error for {ip} on input status branch: {errorStatus.prettyPrint()}")
+                break
+
+            if not varBinds:
+                logging.debug(f"DEBUG: No more varBinds returned for input status walk, ending.")
+                break
+
+            oid, value = varBinds[0]
+            full_polled_oid_tuple = oid.getOid().asTuple()
+
+            # Check if OID is within the input status branch
+            if not full_polled_oid_tuple[:len(input_status_base_oid_tuple)] == input_status_base_oid_tuple:
+                logging.debug(f"DEBUG: OID {oid.prettyPrint()} is outside input status branch, stopping walk.")
+                break
+            
+            try:
+                child_id_parts = full_polled_oid_tuple[len(input_status_base_oid_tuple):]
+                if child_id_parts:
+                    current_child_id = str(child_id_parts[0])
+                    current_input_status_specific_oid_tuple = input_status_base_oid_tuple + (int(current_child_id),)
+                    original_input_status_oid_str = f"{input_status_base_oid_str}.{current_child_id}"
+
+                    status_result = await self._get_snmp_value(ip, community, current_input_status_specific_oid_tuple, original_input_status_oid_str)
+                    if status_result.get("interpreted") == "disabled":
+                        disabled_component_ids.add(current_child_id)
+                        logging.debug(f"DEBUG: Identified disabled component: Child ID '{current_child_id}' (OID: {original_input_status_oid_str})")
+                    else:
+                        logging.debug(f"DEBUG: Component {current_child_id} is not disabled (Status: {status_result.get('interpreted')})")
+                else:
+                    logging.warning(f"Warning: Could not extract child ID from OID {oid.prettyPrint()} for input status.")
+            except Exception as e:
+                logging.warning(f"Error processing input status OID {oid.prettyPrint()}: {e}", exc_info=True)
+            
+            current_input_status_oid_to_walk = oid
+
 
 # Global instance of the client
 kmx_api_client = KMXAPIClient()

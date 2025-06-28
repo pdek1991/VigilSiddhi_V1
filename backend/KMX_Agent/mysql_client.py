@@ -279,7 +279,7 @@ class MySQLManager:
         return self._execute_query(query, params, commit=True)
 
     def get_kmx_configs(self):
-        query = "SELECT id, kmx_ip, community, base_oid, device_name FROM kmx_configs"
+        query = "SELECT id, kmx_ip, community, base_oid, device_name FROM kmx_configs where id = '11'"
         return self._execute_query(query, fetch_all=True)
     
     def get_kmx_config_by_id(self, config_id):

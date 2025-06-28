@@ -426,7 +426,11 @@
                 <label for="message">Message</label>
                 <input type="text" id="message" placeholder="Search Message">
             </div>
-            <!-- Removed Block ID filter group -->
+            <!-- Block ID filter group - now hidden but present for functional use -->
+            <div class="filter-group" style="display: none;">
+                <label for="block_id_filter">Block ID</label>
+                <input type="text" id="block_id_filter" placeholder="Filter by Block ID" disabled>
+            </div>
         </div>
         <div class="action-buttons">
             <button class="search-btn" onclick="applyFiltersAndFetch()">Search</button>
@@ -444,7 +448,7 @@
                 <th style="width: 150px;">Group Name</th>
                 <th style="width: 350px;">Message</th> <!-- Default larger width for message -->
                 <th style="width: 100px;">Severity</th>
-                <!-- Removed Block ID Column Header -->
+                <th style="width: 100px; display: none;">Block ID</th> <!-- Hiding the column header -->
             </tr>
         </thead>
         <tbody></tbody>
@@ -463,6 +467,40 @@
         let startX, startWidth;
         const REFRESH_INTERVAL_MS = 60 * 1000; // 1 minute in milliseconds
         let autoRefreshInterval; // To store the interval ID for clearing
+
+        /**
+         * Parses URL query parameters.
+         * @returns {Object} An object containing the query parameters.
+         */
+        function getQueryParams() {
+            const params = {};
+            window.location.search.substring(1).split('&').forEach(param => {
+                const parts = param.split('=');
+                if (parts.length === 2) {
+                    params[decodeURIComponent(parts[0])] = decodeURIComponent(parts[1]);
+                }
+            });
+            return params;
+        }
+
+        /**
+         * Normalizes frontend_block_id (e.g., C.104 to C.0104) for consistency.
+         * @param {string} blockId - The block ID to normalize.
+         * @returns {string} The normalized block ID.
+         */
+        function normalizeFrontendBlockId(blockId) {
+            if (!blockId || !blockId.startsWith('C.')) {
+                return blockId;
+            }
+            const match = blockId.match(/^C\.(\d+)(\d{2})$/);
+            if (match) {
+                let channelNum = parseInt(match[1], 10);
+                let deviceSuffix = match[2];
+                const paddedChannelNum = String(channelNum).padStart(2, '0');
+                return `C.${paddedChannelNum}${deviceSuffix}`;
+            }
+            return blockId;
+        }
 
         /**
          * Sets the default 'From Timestamp' to 12 hours ago and 'To Timestamp' to now.
@@ -541,26 +579,40 @@
         /**
          * Fetches historical alarm data from the backend API.
          * Populates filters, renders summary cards, and renders the table upon successful fetch.
-         * @param {boolean} applyCurrentFilters - If true, apply current UI filter values after fetching new data.
+         * @param {boolean} applyCurrentFilters - If true, collect and apply current UI filter values (from inputs).
+         * If false, only use time filters and initialBlockId.
+         * @param {string} [initialBlockId] - An optional block ID to pre-filter by on initial load.
          */
-        async function fetchData(applyCurrentFilters = false) {
+        async function fetchData(applyCurrentFilters = false, initialBlockId = null) {
             try {
                 const tbody = document.querySelector("#results tbody");
-                // Adjusted colspan to 7 as Block ID column is removed
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-500">Loading alarms...</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-gray-500">Loading alarms...</td></tr>';
                 document.getElementById('pagination-controls').innerHTML = ''; // Clear pagination on load
                 
                 const fetchBody = {};
-                // Use current values from filter inputs for fetchBody
+
+                // Always include time filters
                 const fromTimestamp = document.getElementById('from_timestamp').value;
                 const toTimestamp = document.getElementById('to_timestamp').value;
-
                 if (fromTimestamp) {
                     fetchBody.from_timestamp = new Date(fromTimestamp).toISOString();
                 }
                 if (toTimestamp) {
                     fetchBody.to_timestamp = new Date(toTimestamp).toISOString();
                 }
+
+                // If applyCurrentFilters is true, or initialBlockId is provided, get other filter values from UI
+                // Note: initialBlockId is set into block_id_filter input first.
+                if (applyCurrentFilters || initialBlockId) {
+                    fetchBody.device_name = document.getElementById('device_name').value;
+                    fetchBody.severity = document.getElementById('severity').value;
+                    fetchBody.agent_type = document.getElementById('type').value; // Map 'type' input to 'agent_type' for backend
+                    fetchBody.group_name = document.getElementById('group_name').value;
+                    fetchBody.message = document.getElementById('message').value;
+                    fetchBody.block_id = document.getElementById('block_id_filter').value; // Get from the hidden input
+                }
+
+                console.log("Sending fetchBody to backend:", fetchBody); // Debug log
 
                 const response = await fetch("/api/v1/get_alarm_history", {
                     method: 'POST',
@@ -576,19 +628,12 @@
                 }
 
                 allData = data.hits; // The backend now returns { "hits": [...] }
+                filteredData = allData; // The backend should have already filtered, so assign directly
                 
-                if (applyCurrentFilters) {
-                    // If triggered by search button, apply filters to newly fetched data
-                    _applyFiltersInternal();
-                } else {
-                    // For initial load or auto-refresh, display all new data
-                    filteredData = allData;
-                    renderSummaryCards(allData); // Summary cards always reflect ALL fetched data initially
-                }
-
+                renderSummaryCards(filteredData); // Summary cards reflect the already filtered data
                 currentPage = 1; // Reset to first page
                 renderTable(filteredData); // Table reflects filtered data
-                populateFilters(allData); // Populate datalists from ALL fetched data
+                populateFilters(allData); // Populate datalists from ALL fetched data (for future filtering)
                 setupResizableColumns();
             }
             catch (err) {
@@ -650,78 +695,85 @@
         function applySeverityFilter(severityType) {
             // Clear other filters first
             document.getElementById('device_name').value = '';
-            document.getElementById('severity').value = '';
+            document.getElementById('severity').value = ''; // This will be set below
             document.getElementById('type').value = '';
             document.getElementById('group_name').value = '';
             document.getElementById('message').value = '';
-            // Do NOT clear time filters when clicking severity card, as those are part of the initial fetch
-            // document.getElementById('from_timestamp').value = '';
-            // document.getElementById('to_timestamp').value = '';
+            // Do NOT clear block_id_filter if it was set by URL, let it persist
             
-            // Set the severity filter and trigger filter on existing data
+            // Set the severity filter and trigger fetch
             document.getElementById('severity').value = severityType;
-            _applyFiltersInternal(); // Apply filters without re-fetching, as fetchData already brought the superset
+            applyFiltersAndFetch(); // Trigger a re-fetch with all current UI filters
         }
 
         /**
          * Function to be called when "Search" button is clicked.
-         * It will first fetch new data, then apply the current filters.
+         * It will fetch new data, applying all current UI filter values.
          */
         function applyFiltersAndFetch() {
-            fetchData(true); // Pass true to indicate that filters should be applied after fetching
+            fetchData(true); // Pass true to indicate that all filters should be applied
         }
 
         /**
          * Internal function to apply filters to the currently loaded `allData`.
-         * This is separated so `fetchData` can call it after loading data,
-         * and it can also be called directly for client-side filtering changes
-         * without re-fetching (though for this app, we're always re-fetching for search).
+         * This function is now redundant for primary filtering since `fetchData` does it server-side.
+         * It's kept for potential future client-side post-processing or fallback.
          */
         function _applyFiltersInternal() {
-            const filters = {
-                device_name: document.getElementById('device_name').value.toLowerCase(),
-                severity: document.getElementById('severity').value.toLowerCase(),
-                type: document.getElementById('type').value.toLowerCase(),
-                group_name: document.getElementById('group_name').value.toLowerCase(),
-                message: document.getElementById('message').value.toLowerCase(),
-                from_timestamp: document.getElementById('from_timestamp').value,
-                to_timestamp: document.getElementById('to_timestamp').value
-            };
-
+            // This function is effectively replaced by backend filtering in fetchData
+            // However, if you wanted client-side *refinement* of already backend-filtered data,
+            // this would be the place. For now, it's simplified.
             filteredData = allData.filter(hit => {
                 const s = hit._source;
+                const filters = { // Re-read filters for robustness, though mostly for client-side use if needed
+                    device_name: document.getElementById('device_name').value.toLowerCase(),
+                    severity: document.getElementById('severity').value.toLowerCase(),
+                    type: document.getElementById('type').value.toLowerCase(), // This is UI 'type'
+                    group_name: document.getElementById('group_name').value.toLowerCase(),
+                    message: document.getElementById('message').value.toLowerCase(),
+                    from_timestamp: document.getElementById('from_timestamp').value,
+                    to_timestamp: document.getElementById('to_timestamp').value,
+                    block_id: document.getElementById('block_id_filter').value
+                };
+
                 const timestamp = new Date(s.timestamp);
                 const fromTime = filters.from_timestamp ? new Date(filters.from_timestamp) : null;
                 const toTime = filters.to_timestamp ? new Date(filters.to_timestamp) : null;
 
                 const matchesSeverity = (() => {
-                    if (!filters.severity) return true; // No severity filter
+                    if (!filters.severity) return true;
                     const sev = (s.severity || '').toLowerCase();
-                    if (filters.severity === 'critical') return ["critical", "error", "fatal"].includes(sev); // Added fatal
+                    if (filters.severity === 'critical') return ["critical", "error", "fatal"].includes(sev);
                     if (filters.severity === 'warning') return ["warning", "major", "minor"].includes(sev);
-                    if (filters.severity === 'info') return ["info", "ok", "normal"].includes(sev); // Added info, ok, normal
-                    return sev.includes(filters.severity); // For direct text search
+                    if (filters.severity === 'info') return ["info", "ok", "normal"].includes(sev);
+                    return sev.includes(filters.severity);
                 })();
 
+                // Note: s.type holds the 'agent_type' from backend
+                const matchesType = !filters.type || (s.type && s.type.toLowerCase().includes(filters.type));
+
+                const matchesBlockId = !filters.block_id || 
+                                     (s.frontend_block_id && normalizeFrontendBlockId(s.frontend_block_id) === filters.block_id) ||
+                                     (s.group_id && s.group_id === filters.block_id);
 
                 return (
                     (!filters.device_name || (s.device_name && s.device_name.toLowerCase().includes(filters.device_name))) &&
                     matchesSeverity &&
-                    (!filters.type || (s.type && s.type.toLowerCase().includes(filters.type))) &&
+                    matchesType && // Use matchesType from above
                     (!filters.group_name || (s.group_name && s.group_name.toLowerCase().includes(filters.group_name))) &&
                     (!filters.message || (s.message && s.message.toLowerCase().includes(filters.message))) &&
                     (!fromTime || timestamp >= fromTime) &&
-                    (!toTime || timestamp <= toTime)
+                    (!toTime || timestamp <= toTime) &&
+                    matchesBlockId
                 );
             });
-
-            currentPage = 1; // Reset to first page after applying filters
+            currentPage = 1;
             renderTable(filteredData);
-            renderSummaryCards(filteredData); // NEW: Update summary cards with filtered data
+            renderSummaryCards(filteredData);
         }
 
         /**
-         * Clears all filter inputs and reloads the table with all data.
+         * Clears all filter inputs and reloads the table with fresh data.
          */
         function clearFilters() {
             document.getElementById('device_name').value = '';
@@ -729,10 +781,11 @@
             document.getElementById('type').value = '';
             document.getElementById('group_name').value = '';
             document.getElementById('message').value = '';
+            document.getElementById('block_id_filter').value = ''; // Clear block ID filter
+            document.getElementById('block_id_filter').disabled = true; // Disable it again
             setDefaultTimeFilters(); // Reset time filters to default (last 12 hours)
-            // filteredData = allData; // Reset filtered data to all data (will be re-fetched on next interval anyway) - REMOVED, fetchData will handle this
             currentPage = 1;
-            fetchData(); // Fetch fresh data and re-render with default time filters
+            fetchData(); // Fetch fresh data with no filters (other than default time range)
         }
 
         /**
@@ -743,7 +796,7 @@
             const sets = {
                 device_names: new Set(),
                 severities: new Set(),
-                types: new Set(),
+                types: new Set(), // Now for 'agent_type'
                 group_names: new Set()
             };
 
@@ -751,7 +804,7 @@
                 const s = hit._source;
                 if (s.device_name) sets.device_names.add(s.device_name);
                 if (s.severity) sets.severities.add(s.severity);
-                if (s.type) sets.types.add(s.type);
+                if (s.type) sets.types.add(s.type); // Populate 'types' datalist from 'type' field (agent_type)
                 if (s.group_name) sets.group_names.add(s.group_name);
             });
 
@@ -779,14 +832,13 @@
             const paginatedData = data.slice(startIndex, endIndex);
 
             if (paginatedData.length === 0) {
-                // Adjusted colspan to 7 as Block ID column is removed
-                tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-gray-500">No alarms found matching your criteria.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-gray-500">No alarms found matching your criteria.</td></tr>';
             } else {
                 tbody.innerHTML = paginatedData.map(hit => {
                     const s = hit._source;
                     const sev = (s.severity || '').toLowerCase();
                     let rowClass = 'severity-Info'; // Default to light blue for others
-                    if (["critical", "error", "fatal"].includes(sev)) { // Added fatal
+                    if (["critical", "error", "fatal"].includes(sev)) {
                         rowClass = 'severity-Critical'; // Light red
                     } else if (["warning", "major", "minor"].includes(sev)) {
                         rowClass = 'severity-Warning'; // Light yellow
@@ -809,7 +861,7 @@
                         <td data-label="Group Name">${safe(s.group_name)}</td>
                         <td data-label="Message">${safe(s.message)}</td>
                         <td data-label="Severity">${safe(s.severity)}</td>
-                        <!-- Removed Block ID data cell -->
+                        <td data-label="Block ID" style="display: none;">${safe(s.frontend_block_id || s.group_id)}</td> <!-- Hiding the data cell -->
                     </tr>`;
                 }).join('');
             }
@@ -937,8 +989,23 @@
         document.addEventListener('DOMContentLoaded', setDefaultTimeFilters);
         // Initial data fetch when the page loads
         document.addEventListener('DOMContentLoaded', () => {
-            fetchData(); // Initial fetch
-            autoRefreshInterval = setInterval(fetchData, REFRESH_INTERVAL_MS); // Start auto-refresh
+            const queryParams = getQueryParams();
+            const blockIdFromUrl = queryParams.block_id;
+
+            if (blockIdFromUrl) {
+                document.getElementById('block_id_filter').value = blockIdFromUrl;
+                document.getElementById('block_id_filter').disabled = false; // Enable it so its value is included in fetchBody
+                // When coming from dashboard, immediately apply the block_id filter
+                fetchData(true, blockIdFromUrl); // Pass true to gather all filters, and blockIdFromUrl
+            } else {
+                fetchData(); // Initial fetch without specific block_id filter
+            }
+            // Auto-refresh also applies block_id filter if it exists
+            autoRefreshInterval = setInterval(() => {
+                const currentBlockId = document.getElementById('block_id_filter').value;
+                const isBlockIdActive = currentBlockId !== '' && !document.getElementById('block_id_filter').disabled;
+                fetchData(isBlockIdActive, isBlockIdActive ? currentBlockId : null);
+            }, REFRESH_INTERVAL_MS);
         });
     </script>
 </body>
