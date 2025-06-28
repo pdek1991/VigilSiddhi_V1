@@ -188,7 +188,7 @@ class MySQLManager:
         return self._execute_query(query, params, commit=True)
 
     def get_ird_configs(self):
-        query = "SELECT id, ird_ip, description, username, password, system_id, channel_name FROM ird_configs"
+        query = "SELECT id, ird_ip, description, username, password, system_id, channel_name, input FROM ird_configs"
         return self._execute_query(query, fetch_all=True)
     
     def get_ird_config_by_id(self, config_id):

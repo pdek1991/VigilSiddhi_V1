@@ -1,3 +1,4 @@
+# ird_config_agent.py
 import sys
 import os
 import time
@@ -5,15 +6,14 @@ import json
 import logging
 import redis
 from datetime import datetime
-import re # Added for IP address regex check
-import concurrent.futures # Import for parallel execution
+import concurrent.futures
 
 # Adjust path to import MySQLManager and IRDAPIClient
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__))))
 
 # Import custom modules
 from mysql_client import MySQLManager
-from ird_api_client import ird_api_client # Use the shared client instance
+from ird_api_client import ird_api_client
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -27,17 +27,42 @@ REDIS_HOST = os.environ.get('REDIS_HOST', '192.168.56.30')
 REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
 
 REDIS_STREAM_NAME = "vs:agent:ird_config_status"
-POLLING_INTERVAL_SECONDS = 300 # Poll IRD configs every 5 minutes
-MAX_WORKERS = 10 # Number of parallel threads to use for fetching IRD data
+POLLING_INTERVAL_SECONDS = 30
+MAX_WORKERS = 10
 
 # Initialize Redis and MySQL clients
-r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=False) # Keep responses as bytes
-mysql_manager = MySQLManager(
-    host=MYSQL_HOST,
-    database=MYSQL_DATABASE,
-    user=MYSQL_USER,
-    password=MYSQL_PASSWORD
-)
+r = None
+mysql_manager = None
+
+logging.debug("DEBUG: Attempting to initialize Redis connection.")
+try:
+    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=False) # Keep responses as bytes
+    r.ping() # Test connection immediately
+    logging.info("Successfully connected to Redis.")
+except redis.exceptions.ConnectionError as e:
+    logging.critical(f"FATAL: Failed to connect to Redis at {REDIS_HOST}:{REDIS_PORT}. Please ensure Redis is running and accessible. Error: {e}")
+    sys.exit(1) # Exit if Redis connection fails at startup
+except Exception as e:
+    logging.critical(f"FATAL: Unexpected error during Redis connection test: {e}", exc_info=True)
+    sys.exit(1)
+
+logging.debug("DEBUG: Attempting to initialize MySQLManager.")
+try:
+    mysql_manager = MySQLManager(
+        host=MYSQL_HOST,
+        database=MYSQL_DATABASE,
+        user=MYSQL_USER,
+        password=MYSQL_PASSWORD
+    )
+    # Check if the MySQL connection within MySQLManager is active
+    if not mysql_manager.connection or not mysql_manager.connection.is_connected():
+        logging.critical(f"FATAL: MySQLManager initialized but connection is not active. Check database credentials and server status.")
+        sys.exit(1)
+    logging.info("Successfully initialized MySQLManager and connected to database.")
+except Exception as e:
+    logging.critical(f"FATAL: Failed to initialize MySQLManager: {e}. Please check MySQL configuration and connectivity.")
+    sys.exit(1) # Exit if MySQL initialization fails at startup
+
 
 def publish_status_to_redis(payload):
     """Publishes a status message to the Redis Stream."""
@@ -47,45 +72,57 @@ def publish_status_to_redis(payload):
     except Exception as e:
         logging.error(f"Failed to publish to Redis stream {REDIS_STREAM_NAME}: {e}")
 
-def get_overall_status_from_details(details):
+def get_overall_status_from_details(details, device_ip):
     """
-    Determines overall status and severity for IRD config based primarily on faults.
-    The 'message' field will only display the highest severity fault message.
+    Determines overall status and severity for IRD config based primarily on faults and API errors.
+    The 'message' field will only display the highest severity fault message or API error message.
     """
     overall_status = "ok"
     overall_severity = "INFO"
-    overall_message = "IRD config status is OK." # Default message
+    overall_message = f"IRD device {device_ip} status is OK." # Default message
 
     # Prioritize API errors for overall status/message
     if details.get('api_errors'):
         overall_status = "error"
         overall_severity = "ERROR"
-        overall_message = "API communication errors encountered: " + "; ".join(details["api_errors"])
+        overall_message = f"API communication errors encountered for {device_ip}: " + "; ".join(details["api_errors"])
         return overall_status, overall_severity, overall_message
 
     # Process faults to determine primary status and message
     if details.get('faults'):
         highest_severity_fault = None
-        severity_rank = {"INFO": 0, "WARNING": 1, "MINOR": 1, "ALARM": 2, "MAJOR": 2, "CRITICAL": 3, "ERROR": 3}
+        # Mapping from interpreted severity strings to a numerical rank for comparison
+        severity_rank = {
+            "INFO": 0, "normal": 0,
+            "WARNING": 1, "minor": 1,
+            "ALARM": 2, "major": 2,
+            "CRITICAL": 3, "error": 3
+        }
 
         for fault in details['faults']:
-            fault_type = fault.get('type', 'INFO').upper()
-            if highest_severity_fault is None or severity_rank.get(fault_type, 0) > severity_rank.get(highest_severity_fault['type'].upper(), 0):
+            # The 'type' field comes from IRDAPIClient's interpreted value (e.g., "CRITICAL")
+            fault_severity_str = fault.get('type', 'INFO').upper()
+            current_rank = severity_rank.get(fault_severity_str, 0) # Default to 0 (INFO)
+
+            if highest_severity_fault is None or current_rank > severity_rank.get(highest_severity_fault['type'].upper(), 0):
                 highest_severity_fault = fault
         
         if highest_severity_fault:
-            fault_severity = highest_severity_fault.get('type', '').upper()
-            overall_message = f"Fault: {highest_severity_fault.get('details', 'N/A')} (Severity: {fault_severity}, Since: {highest_severity_fault.get('set_since', 'N/A')})"
+            payload_severity = "INFO"
+            fault_severity_rank = severity_rank.get(highest_severity_fault['type'].upper(), 0)
             
-            if fault_severity in ["CRITICAL", "MAJOR", "ALARM", "ERROR"]:
+            if fault_severity_rank == 3: # CRITICAL / ERROR
+                payload_severity = "CRITICAL"
                 overall_status = "alarm"
-                overall_severity = "CRITICAL"
-            elif fault_severity in ["WARNING", "MINOR", "INFO"]:
+            elif fault_severity_rank == 2: # MAJOR / ALARM
+                payload_severity = "MAJOR"
+                overall_status = "alarm"
+            elif fault_severity_rank == 1: # WARNING / MINOR
+                payload_severity = "WARNING"
                 overall_status = "warning"
-                overall_severity = "WARNING"
-    
-    # Other status checks' messages are NOT combined into the primary 'message'
-    # but their raw data is still available in 'details' for comprehensive logging.
+            
+            overall_message = f"Fault: {highest_severity_fault.get('details', 'N/A')} (Severity: {highest_severity_fault.get('type', 'N/A')}, Since: {highest_severity_fault.get('set_since', 'N/A')})"
+            overall_severity = payload_severity # Set the final overall severity
 
     return overall_status, overall_severity, overall_message
 
@@ -96,21 +133,43 @@ def fetch_and_publish_ird_configs():
     and publishes the consolidated status to Redis.
     """
     logging.info("Starting IRD Config Agent cycle.")
-    ird_configs = mysql_manager.get_ird_configs()
     
-    if not ird_configs:
-        logging.warning("No IRD configurations found in MySQL database.")
+    # --- IMPORTANT FIX: Reconnect MySQL to fetch latest data ---
+    # Only reconnect if the connection is actually closed or not established.
+    if mysql_manager and (not mysql_manager.connection or not mysql_manager.connection.is_connected()):
+        try:
+            mysql_manager.reconnect()
+            logging.info("Successfully reconnected to MySQL.")
+        except Exception as e:
+            logging.error(f"Failed to reconnect to MySQL: {e}. Cannot fetch IRD configurations.", exc_info=True)
+            return
+    elif not mysql_manager:
+        logging.error("MySQLManager not initialized. Cannot fetch IRD configurations.")
+        return
+    
+    # Ensure MySQLManager is initialized and connected after reconnect (or if it was already connected)
+    if not mysql_manager.connection or not mysql_manager.connection.is_connected():
+        logging.error("MySQLManager not connected after all attempts. Cannot fetch IRD configurations.")
         return
 
-    # Use ThreadPoolExecutor for parallel execution
+    ird_configs = mysql_manager.get_ird_configs()
+    
+    if ird_configs is None:
+        logging.error("Received None for IRD configurations from MySQLManager. Assuming database error or no data.")
+        return
+
+    if not ird_configs:
+        logging.warning("No IRD configurations found in MySQL database. Skipping polling cycle.")
+        return
+
+    logging.info(f"Found {len(ird_configs)} IRD configurations to process.")
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # Submit each IRD config to the executor
         futures = [executor.submit(process_ird_config, config) for config in ird_configs]
         
-        # Wait for all futures to complete (optional, can also handle results here)
         for future in concurrent.futures.as_completed(futures):
             try:
-                future.result() # This will re-raise any exceptions caught in process_ird_config
+                future.result()
             except Exception as e:
                 logging.error(f"Error processing IRD config in parallel: {e}")
 
@@ -122,28 +181,44 @@ def process_ird_config(config):
     ird_ip = config['ird_ip']
     username = config['username']
     password = config['password']
-    system_id = config['system_id']
+    # system_id = config['system_id'] # Not directly used for API calls
     channel_name_from_db = config.get('channel_name', f"Channel for {ird_ip}")
     description = config.get('description', f"IRD Device {ird_ip}")
+    input_type = config.get('input', 'UNKNOWN').upper() # Get input type from DB
 
-    logging.info(f"Processing IRD config for IP: {ird_ip}")
-    session_id = ird_api_client.login(ird_ip, username, password)
+    logging.info(f"Processing IRD config for IP: {ird_ip} with input type: {input_type}")
     
     payload_details = {
         "api_errors": []
     }
 
+    session_id = None
+    try:
+        session_id = ird_api_client.login(ird_ip, username, password)
+    except Exception as e:
+        logging.error(f"Error logging into IRD {ird_ip}: {e}", exc_info=True)
+        payload_details['api_errors'].append(f"Login failed: {e}")
+
     if session_id:
         try:
-            # Fetch various detailed status points
-            rf_status = ird_api_client.get_rf_status(ird_ip, session_id)
-            if rf_status is not None: payload_details['rf_status'] = rf_status
-            else: payload_details['api_errors'].append("Failed to get RF status.")
+            # Dynamically fetch input status based on the 'input' column
+            if input_type == 'RF':
+                rf_status = ird_api_client.get_rf_status(ird_ip, session_id)
+                if rf_status is not None: payload_details['rf_status'] = rf_status
+                else: payload_details['api_errors'].append("Failed to get RF status.")
+            elif input_type == 'ASI':
+                asi_status = ird_api_client.get_asi_status(ird_ip, session_id)
+                if asi_status is not None: payload_details['asi_status'] = asi_status
+                else: payload_details['api_errors'].append("Failed to get ASI status.")
+            elif input_type == 'IP': # Assuming 'IP' corresponds to MOIP input
+                moip_input_status = ird_api_client.get_moip_input_status(ird_ip, session_id)
+                if moip_input_status is not None: payload_details['moip_input_status'] = moip_input_status
+                else: payload_details['api_errors'].append("Failed to get MOIP input status.")
+            else:
+                logging.warning(f"Unknown input type '{input_type}' for IRD {ird_ip}. No specific input status fetched.")
 
-            asi_status = ird_api_client.get_asi_status(ird_ip, session_id)
-            if asi_status is not None: payload_details['asi_status'] = asi_status
-            else: payload_details['api_errors'].append("Failed to get ASI status.")
-
+            # Remaining logic to check /ws/v2/service_cfg/output/moip, /ws/v2/status/pe,
+            # /ws/v2/status/device/eth, /ws/v2/status/device/power and /ws/v2/status/faults/status remains same
             moip_output_status = ird_api_client.get_moip_output_status(ird_ip, session_id)
             if moip_output_status is not None: payload_details['moip_output_status'] = moip_output_status
             else: payload_details['api_errors'].append("Failed to get MOIP output status.")
@@ -151,10 +226,6 @@ def process_ird_config(config):
             moip_output_config = ird_api_client.get_moip_output_config(ird_ip, session_id)
             if moip_output_config is not None: payload_details['moip_output_config'] = moip_output_config
             else: payload_details['api_errors'].append("Failed to get MOIP output configuration.")
-
-            moip_input_status = ird_api_client.get_moip_input_status(ird_ip, session_id)
-            if moip_input_status is not None: payload_details['moip_input_status'] = moip_input_status
-            else: payload_details['api_errors'].append("Failed to get MOIP input status.")
 
             channel_status = ird_api_client.get_channel_status(ird_ip, session_id)
             if channel_status is not None: payload_details['channel_status'] = channel_status
@@ -173,29 +244,31 @@ def process_ird_config(config):
             else: payload_details['api_errors'].append("Failed to get Faults status.")
 
         except Exception as e:
-            logging.error(f"Error fetching IRD details for {ird_ip}: {e}")
+            logging.error(f"Error fetching IRD details for {ird_ip}: {e}", exc_info=True)
             payload_details['api_errors'].append(f"Unhandled error during data fetch: {e}")
-        finally:
-            # No explicit logout, session expires automatically or is reused
-            pass
+        # finally:
+        #     # Attempt to logout, but don't fail the entire process if it doesn't work
+        #     if session_id:
+        #         try:
+        #             ird_api_client.logout(ird_ip, session_id)
+        #         except Exception as e:
+        #             logging.warning(f"Failed to logout from IRD {ird_ip}: {e}")
     else:
-        payload_details['api_errors'].append("Failed to obtain session ID (login failed).")
+        logging.error(f"Skipping data fetch for {ird_ip} due to prior login failure.")
             
-    # Determine overall status and severity for the Redis message
-    overall_status, overall_severity, overall_message = get_overall_status_from_details(payload_details)
+    overall_status, overall_severity, overall_message = get_overall_status_from_details(payload_details, ird_ip)
 
-    # Construct Redis payload
     redis_payload = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "agent_type": "ird_config",
         "device_ip": ird_ip,
-        "device_name": description, # Use the description from DB as device_name
-        "frontend_block_id": f"IRD_CONFIG_{ird_ip.replace('.', '_')}", # A unique ID for this config snapshot
-        "group_name": channel_name_from_db, # Link to its channel name
+        "device_name": description,
+        "frontend_block_id": "G.IRD", # Fixed value as requested
+        "group_name": channel_name_from_db,
         "message": overall_message,
         "severity": overall_severity,
         "status": overall_status,
-        "details": payload_details # Include all fetched details for historical ElasticSearch
+        "details": payload_details
     }
     
     publish_status_to_redis(redis_payload)
