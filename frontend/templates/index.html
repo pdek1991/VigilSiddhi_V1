@@ -633,7 +633,8 @@
                     <a href="/?view=dashboard" onclick="window.open(this.href, '_blank'); return false;" target="_blank" rel="noopener noreferrer">Dashboard</a>
                     <a href="https://img-cdn.publive.online/fit-in/1280x960/filters:format(webp)/afaqs/media/post_attachments/3ffb6c3ced5b4ef914c73a09af551d4666f6367.png" target="_blank" rel="noopener noreferrer">Trending</a>
                     <a href="/ird_overview" target="_blank" rel="noopener noreferrer">IRD Overview</a>
-                    <a href="/?view=config" onclick="window.open(this.href, '_blank'); return false;" target="_blank" rel="noopener noreferrer">Config</a>
+                    <a href="/switch_overview" onclick="window.open(this.href, '_blank'); return false;" target="_blank" rel="noopener noreferrer">Switch Overview</a>
+                    <a href="/config.html" target="_blank" rel="noopener noreferrer">Config</a>
                 </div>
             </div>
             <div class="dashboard-logo-container">
@@ -890,7 +891,7 @@
             if (targetViewElement) {
                 targetViewElement.classList.remove('hidden');
             } else {
-                console.warn(`showView: Element with ID '${viewId}-view' not found.`);
+                console.warn(`showView: Element with ID '${viewId}-view' not found.`); // Debug log
             }
 
             if (viewId === 'config') {

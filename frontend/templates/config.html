@@ -1,0 +1,1322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VigilSiddhi Configuration</title>
+    <link rel="icon" type="image/gif" href="/static/logo.gif">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <style>
+        /* Base styles from index.html for consistency */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #080808; /* Dark background */
+            color: #e2e8f0; /* Light text */
+            overflow-x: hidden; /* Prevent horizontal scrolling */
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh; /* Ensure body takes full viewport height */
+            margin: 0; /* Reset default body margin */
+            padding: 0; /* Reset default body padding */
+        }
+
+        /* Header styling for logo and title */
+        .config-header {
+            display: flex;
+            align-items: center; /* Align items vertically in the center */
+            justify-content: center; /* Center content */
+            margin-bottom: 1rem;
+            padding: 0.75rem 1.5rem; /* Add horizontal padding for full width utilization */
+            width: 100%; /* Ensure header uses full width */
+            box-sizing: border-box; /* Include padding in width */
+            position: relative; /* For dropdown menu positioning */
+        }
+
+        .config-logo-container {
+            flex-shrink: 0; /* Prevent logo from shrinking */
+            display: flex;
+            align-items: center; /* Align items vertically */
+            padding-right: 1.5rem; /* Increased space between logo and title */
+        }
+
+        .config-logo {
+            max-width: 100px; /* Reduced logo size */
+            height: auto;
+            border-radius: 0.5rem; /* Rounded corners for the logo */
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+
+        .config-title {
+            flex-grow: 0; /* Do not grow */
+            text-align: center; /* Keep title centered */
+            font-size: 1.5rem; /* Smaller title */
+            font-weight: 700;
+            color: #63b3ed; /* A nice blue for the title */
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+            margin: 0; /* Remove default margins */
+        }
+
+        /* Config-specific styles */
+        .config-container {
+            padding: 1rem 1.5rem;
+            background-color: #2d3748;
+            border-radius: 0.6rem;
+            margin: 0.75rem auto; /* Center with auto margins and add vertical space */
+            width: 95%; /* Adjust width for better spacing */
+            max-width: 1200px; /* Max width for large screens */
+            box-sizing: border-box;
+            box-shadow: 0 3px 5px rgba(0, 0, 0, 0.1);
+            flex-grow: 1; /* Allow to take available space */
+            display: flex;
+            flex-direction: column;
+        }
+
+        .config-tabs {
+            display: flex;
+            flex-wrap: wrap; /* Allow tabs to wrap on smaller screens */
+            margin-bottom: 1rem;
+            border-bottom: 1px solid #4a5568;
+            overflow-x: auto; /* Enable horizontal scrolling for tabs if too many */
+        }
+
+        .config-tab-button {
+            padding: 0.75rem 1.25rem; /* Slightly less padding */
+            cursor: pointer;
+            border-top-left-radius: 0.5rem;
+            border-top-right-radius: 0.5rem;
+            background-color: #2d3748;
+            color: #a0aec0;
+            font-weight: 600;
+            transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out;
+            margin-right: 0.25rem;
+            white-space: nowrap; /* Prevent tab text from wrapping */
+        }
+
+        .config-tab-button.active {
+            background-color: #4a5568;
+            color: #e2e8f0;
+            border-bottom: 2px solid #63b3ed;
+        }
+
+        .config-tab-button:hover:not(.active) {
+            background-color: #3b4453;
+        }
+
+        .config-tab-content {
+            flex-grow: 1;
+            padding: 1rem;
+            background-color: #1a202c; /* Inner dark background */
+            border-radius: 0.5rem;
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            gap: 1.5rem; /* Increased gap between sections */
+            overflow-x: auto; /* Allow content to scroll horizontally if needed */
+        }
+
+        .config-tab-content.active {
+            display: flex; /* Show when active */
+        }
+
+        /* Form and Table styling */
+        .config-section {
+            background-color: #2d3748;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+        }
+
+        .config-section h3 {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #63b3ed;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid #4a5568;
+            padding-bottom: 0.5rem;
+        }
+
+        .config-form {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); /* Responsive grid for form inputs */
+            gap: 1rem; /* Gap between form fields */
+            margin-bottom: 1rem;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .config-form label {
+            display: block;
+            margin-bottom: 0.25rem;
+            font-weight: 500;
+            color: #a0aec0;
+            font-size: 0.9rem;
+        }
+
+        .config-form input[type="text"],
+        .config-form input[type="password"],
+        .config-form input[type="number"],
+        .config-form select,
+        .config-form textarea {
+            width: 100%;
+            padding: 0.6rem;
+            border-radius: 0.375rem;
+            border: 1px solid #4a5568;
+            background-color: #1a202c; /* Darker input background */
+            color: #e2e8f0;
+            font-size: 0.9rem;
+            box-sizing: border-box; /* Include padding in width */
+        }
+
+        .config-form input:focus,
+        .config-form select:focus,
+        .config-form textarea:focus {
+            outline: none;
+            border-color: #63b3ed;
+            box-shadow: 0 0 0 2px rgba(99, 179, 237, 0.5);
+        }
+
+        .config-form button {
+            background-color: #63b3ed; /* Blue for submit */
+            color: #ffffff;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out;
+            margin-top: 1rem; /* Space after inputs */
+            grid-column: 1 / -1; /* Make button span all columns */
+            justify-self: start; /* Align button to start */
+        }
+
+        .config-form button:hover {
+            background-color: #4299e1; /* Darker blue on hover */
+        }
+
+        .config-table-container {
+            overflow-x: auto; /* Enable horizontal scrolling for tables */
+            margin-top: 1rem;
+        }
+
+        .config-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 700px; /* Ensure a minimum width for the table */
+        }
+
+        .config-table th,
+        .config-table td {
+            padding: 0.8rem;
+            border: 1px solid #4a5568; /* Darker border */
+            text-align: left;
+            font-size: 0.85rem;
+            word-break: break-word; /* Allow long words to break */
+        }
+
+        .config-table th {
+            background-color: #4a5568; /* Header background */
+            font-weight: 700;
+            color: #e2e8f0;
+            white-space: nowrap; /* Prevent headers from wrapping */
+        }
+
+        .config-table td {
+            background-color: #2d3748; /* Cell background */
+            color: #cbd5e0;
+        }
+
+        .config-table button {
+            background-color: #ef4444; /* Red for delete */
+            color: white;
+            padding: 0.3rem 0.6rem;
+            border-radius: 0.3rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: background-color 0.2s ease-in-out;
+            margin-right: 0.5rem; /* Space between buttons */
+        }
+        .config-table button.edit-button {
+            background-color: #f59e0b; /* Yellow for edit */
+        }
+        .config-table button:hover {
+            background-color: #dc2626; /* Darker red */
+        }
+        .config-table button.edit-button:hover {
+            background-color: #d97706; /* Darker yellow */
+        }
+
+        .validation-error {
+            color: #ef4444;
+            font-size: 0.8rem;
+            margin-top: 0.25rem;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+
+        /* Message Box */
+        .message-box {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: #2d3748;
+            border-radius: 0.6rem;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            padding: 2rem;
+            z-index: 1001;
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            color: #e2e8f0;
+            font-size: 1.1rem;
+            max-width: 80%;
+            text-align: center;
+        }
+        .message-box button {
+            background-color: #63b3ed;
+            color: white;
+            padding: 0.6rem 1.2rem;
+            border-radius: 0.4rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .message-box button:hover {
+            background-color: #4299e1;
+        }
+        .message-box.show {
+            display: flex;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .config-container {
+                width: 98%;
+                padding: 0.75rem;
+            }
+            .config-tabs {
+                justify-content: flex-start; /* Align tabs to start */
+            }
+            .config-tab-button {
+                padding: 0.6rem 1rem;
+                font-size: 0.85rem;
+            }
+            .config-tab-content {
+                padding: 0.75rem;
+            }
+            .config-form {
+                grid-template-columns: 1fr; /* Stack inputs on small screens */
+            }
+            .config-section h3 {
+                font-size: 1.1rem;
+            }
+            .config-table th,
+            .config-table td {
+                padding: 0.6rem;
+                font-size: 0.75rem;
+            }
+            .config-table button {
+                padding: 0.2rem 0.4rem;
+                font-size: 0.65rem;
+                margin-right: 0.2rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .config-title {
+                font-size: 1.2rem;
+            }
+            .config-logo {
+                max-width: 70px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="py-4">
+        <header class="config-header">
+            <div class="config-logo-container">
+                <img src="/static/logo.gif" alt="VigilSiddhi Logo" class="config-logo" onerror="this.onerror=null;this.src='https://placehold.co/80x80/63b3ed/ffffff?text=VigilSiddhi+Logo';">
+            </div>
+            <h1 class="config-title">VigilSiddhi Configuration</h1>
+        </header>
+
+        <div id="config-view" class="config-container">
+            <div class="config-tabs">
+                <!-- Tabs will be dynamically generated here -->
+            </div>
+
+            <div id="config-tab-content-container">
+                <!-- Tab content will be dynamically generated here -->
+            </div>
+        </div>
+    </div>
+
+    <div id="messageBox" class="message-box">
+        <h3 id="messageBoxTitle" class="text-xl font-bold mb-2"></h3>
+        <p id="messageBoxContent" class="text-md mb-4"></p>
+        <button onclick="document.getElementById('messageBox').classList.remove('show')">OK</button>
+    </div>
+
+    <script>
+        // Base URL for your Flask API
+        const API_BASE_URL = '/api/v1';
+
+        // In-memory storage for configurations (replace with backend API calls for persistence)
+        // These will be populated from backend fetches, and modifications will ideally be sent back.
+        let configs = {
+            switch_configs: [],
+            kmx_configs: [],
+            ird_configs: [],
+            windows_configs: [],
+            global_configs: [],
+            channel_configs: [],
+            device_ips: [],
+            pgm_routing: [],
+            playoutmv_configs: [],
+            windows_services: [], // Nested under windows_configs for display/editing
+            windows_processes: [] // Nested under windows_configs for display/editing
+        };
+
+        // Schema definitions for each table, mapping to mysql_client.py functions.
+        // 'primaryKey' is crucial for edit/delete.
+        // 'fields' define form inputs and table columns.
+        // 'type': 'text', 'password', 'number', 'select', 'textarea'
+        // 'required': boolean
+        // 'pattern': regex for input validation (e.g., IP address)
+        // 'options': array for select inputs [{value: 'val', text: 'Text'}]
+        // 'editable': boolean (can this field be changed during edit)
+        // 'visibleInTable': boolean (should it be shown in the list table)
+        // 'displayAs': string (how to display the column header if different from field name)
+        // 'addFunction': name of MySQLManager function to add data
+        // 'getFunction': name of MySQLManager function to get all data
+        // 'getOneFunction': name of MySQLManager function to get single record (for edit)
+        // 'updateFunction': name of MySQLManager function to update data
+        // 'deleteFunction': name of MySQLManager function to delete data
+        // 'nestedTable': for tables like windows_services/processes, points to parent table and foreign key.
+        //                { parentTable: 'windows_configs', foreignKey: 'windows_config_id', parentPK: 'id' }
+
+        const tableSchemas = {
+            switch_configs: {
+                primaryKey: 'switch_ip', // Using switch_ip as PK for add/delete/update
+                fields: [
+                    { name: 'switch_ip', type: 'text', required: true, pattern: '^([0-9]{1,3}\\.){3}[0-9]{1,3}$', title: 'Enter a valid IP address' },
+                    { name: 'hostname', type: 'text', required: true },
+                    { name: 'domain', type: 'text', required: true },
+                    { name: 'community', type: 'text', required: true },
+                    { name: 'model', type: 'text', required: true },
+                    { name: 'frontend_block_id', type: 'text', required: true, displayAs: 'Frontend Block ID' }
+                ],
+                addFunction: 'add_switch_config',
+                getFunction: 'get_switch_configs',
+                getOneFunction: 'get_switch_config_by_ip',
+                updateFunction: 'update_switch_config',
+                deleteFunction: 'delete_switch_config'
+            },
+            kmx_configs: {
+                primaryKey: 'id', // Assuming 'id' is auto-incremented primary key, will need to fetch from backend on add
+                fields: [
+                    { name: 'kmx_ip', type: 'text', required: true, pattern: '^([0-9]{1,3}\\.){3}[0-9]{1,3}$', title: 'Enter a valid IP address' },
+                    { name: 'community', type: 'text', required: true },
+                    { name: 'base_oid', type: 'text', required: true, displayAs: 'Base OID' },
+                    { name: 'device_name', type: 'text', required: false, displayAs: 'Device Name' }
+                ],
+                addFunction: 'add_kmx_config',
+                getFunction: 'get_kmx_configs',
+                getOneFunction: 'get_kmx_config_by_id', // Assuming get_kmx_config_by_id exists and uses 'id'
+                updateFunction: 'update_kmx_config',
+                deleteFunction: 'delete_kmx_config'
+            },
+            ird_configs: {
+                primaryKey: 'id',
+                fields: [
+                    { name: 'ird_ip', type: 'text', required: true, pattern: '^([0-9]{1,3}\\.){3}[0-9]{1,3}$', title: 'Enter a valid IP address' },
+                    { name: 'description', type: 'text', required: false },
+                    { name: 'username', type: 'text', required: true },
+                    { name: 'password', type: 'password', required: true },
+                    { name: 'system_id', type: 'text', required: true, displayAs: 'System ID' },
+                    { name: 'channel_name', type: 'text', required: false, displayAs: 'Channel Name' }
+                ],
+                addFunction: 'add_ird_config',
+                getFunction: 'get_ird_configs',
+                getOneFunction: 'get_ird_config_by_id',
+                updateFunction: 'update_ird_config',
+                deleteFunction: 'delete_ird_config'
+            },
+            windows_configs: {
+                primaryKey: 'id',
+                fields: [
+                    { name: 'ip_address', type: 'text', required: true, pattern: '^([0-9]{1,3}\\.){3}[0-9]{1,3}$', title: 'Enter a valid IP address' },
+                    { name: 'device_name', type: 'text', required: true, displayAs: 'Device Name' },
+                    { name: 'username', type: 'text', required: true },
+                    { name: 'password', type: 'password', required: true }
+                ],
+                addFunction: 'add_windows_config',
+                getFunction: 'get_windows_configs',
+                getOneFunction: 'get_windows_config_by_id',
+                updateFunction: 'update_windows_config',
+                deleteFunction: 'delete_windows_config',
+                nestedTables: ['windows_services', 'windows_processes'] // Declare nested tables
+            },
+            windows_services: {
+                primaryKey: 'service_id',
+                fields: [
+                    { name: 'windows_config_id', type: 'text', required: true, displayAs: 'Windows Config ID', visibleInTable: true, editable: false }, // Foreign key
+                    { name: 'service_name', type: 'text', required: true, displayAs: 'Service Name' }
+                ],
+                nestedTable: { parentTable: 'windows_configs', foreignKey: 'windows_config_id', parentPK: 'id' },
+                addFunction: 'add_windows_service',
+                getFunction: 'get_windows_services', // Takes windows_config_id as param
+                deleteFunction: 'delete_windows_service'
+                // No update for services/processes in mysql_client, so omit updateFunction
+            },
+            windows_processes: {
+                primaryKey: 'process_id',
+                fields: [
+                    { name: 'windows_config_id', type: 'text', required: true, displayAs: 'Windows Config ID', visibleInTable: true, editable: false }, // Foreign key
+                    { name: 'process_name', type: 'text', required: true, displayAs: 'Process Name' }
+                ],
+                nestedTable: { parentTable: 'windows_configs', foreignKey: 'windows_config_id', parentPK: 'id' },
+                addFunction: 'add_windows_process',
+                getFunction: 'get_windows_processes', // Takes windows_config_id as param
+                deleteFunction: 'delete_windows_process'
+                // No update for services/processes in mysql_client, so omit updateFunction
+            },
+            global_configs: {
+                primaryKey: 'id',
+                fields: [
+                    { name: 'config_id', type: 'text', required: true, displayAs: 'Config ID (Auto-Generated if empty)', editable: false, placeholder: 'Will be generated if left empty' }, // To allow user to provide or auto-generate
+                    { name: 'global_block_name', type: 'text', required: true, displayAs: 'Global Block Name' },
+                    { name: 'ip_address', type: 'text', required: false, pattern: '^([0-9]{1,3}\\.){3}[0-9]{1,3}$', title: 'Enter a valid IP address' },
+                    { name: 'username', type: 'text', required: false },
+                    { name: 'password', type: 'password', required: false },
+                    { name: 'device_name', type: 'text', required: false, displayAs: 'Device Name' }
+                ],
+                addFunction: 'add_global_config',
+                getFunction: 'get_global_configs',
+                getOneFunction: 'get_global_config_by_id',
+                updateFunction: 'update_global_config',
+                deleteFunction: 'delete_global_config'
+            },
+            channel_configs: {
+                primaryKey: 'id',
+                fields: [
+                    { name: 'channel_id', type: 'text', required: true, displayAs: 'Channel ID' },
+                    { name: 'channel_name', type: 'text', required: true, displayAs: 'Channel Name' },
+                    { name: 'pgm', type: 'text', required: false, placeholder: 'PGM Value' }
+                ],
+                addFunction: 'add_channel_config',
+                getFunction: 'get_channel_configs',
+                getOneFunction: 'get_channel_config_by_id',
+                updateFunction: 'update_channel_config',
+                deleteFunction: 'delete_channel_config'
+            },
+            device_ips: { // Renamed from device_ips to match your file
+                primaryKey: 'ip_id', // Assuming ip_id is primary key as per mysql_client
+                fields: [
+                    { name: 'ip_address', type: 'text', required: true, pattern: '^([0-9]{1,3}\\.){3}[0-9]{1,3}$', title: 'Enter a valid IP address' },
+                    { name: 'username', type: 'text', required: true },
+                    { name: 'password', type: 'password', required: true },
+                    { name: 'frontend_block_id', type: 'text', required: true, displayAs: 'Frontend Block ID' },
+                    { name: 'device_name', type: 'text', required: true, displayAs: 'Device Name' },
+                    { name: 'group_name', type: 'select', required: true, displayAs: 'Group Name', options: ["HP-iLO", "D9800-PIRD", "CISCO Switch", "NEXUS-Switch", "Catalyst-SW", "WINDOWS-PROCESS", "HTTP_status"] }
+                ],
+                addFunction: 'add_device_ip',
+                getFunction: 'get_all_device_ips', // get_all_device_ips from mysql_client
+                getOneFunction: 'get_device_ip_by_frontend_block_id', // Assuming this can get by a unique ID
+                updateFunction: 'update_device_ip',
+                deleteFunction: 'delete_device_ip'
+            },
+            pgm_routing: {
+                primaryKey: 'id',
+                fields: [
+                    { name: 'pgm_dest', type: 'text', required: true, displayAs: 'PGM Destination' },
+                    { name: 'router_source', type: 'text', required: true, displayAs: 'Router Source' },
+                    { name: 'frontend_block_id', type: 'text', required: true, displayAs: 'Frontend Block ID' },
+                    { name: 'domain', type: 'text', required: true },
+                    { name: 'channel_name', type: 'text', required: false, displayAs: 'Channel Name' }
+                ],
+                addFunction: 'add_pgm_routing_config',
+                getFunction: 'get_pgm_routing_configs',
+                getOneFunction: 'get_pgm_routing_config_by_id',
+                updateFunction: 'update_pgm_routing_config',
+                deleteFunction: 'delete_pgm_routing_config'
+            },
+            playoutmv_configs: {
+                primaryKey: 'id',
+                fields: [
+                    { name: 'ip_address', type: 'text', required: true, pattern: '^([0-9]{1,3}\\.){3}[0-9]{1,3}$', title: 'Enter a valid IP address' },
+                    { name: 'name', type: 'text', required: true },
+                    { name: 'api_endpoint', type: 'text', required: true, displayAs: 'API Endpoint' },
+                    { name: 'username', type: 'text', required: true },
+                    { name: 'password', type: 'password', required: true }
+                ],
+                addFunction: 'add_playoutmv_config',
+                getFunction: 'get_playoutmv_configs',
+                getOneFunction: 'get_playoutmv_config_by_id',
+                updateFunction: 'update_playoutmv_config',
+                deleteFunction: 'delete_playoutmv_config'
+            }
+        };
+
+        // Current editing state
+        let currentEditingItem = {}; // Stores the item being edited for a specific table
+
+        /**
+         * Generic function to display a custom message box instead of alert/confirm.
+         * @param {string} title - The title of the message box.
+         * @param {string} message - The content message.
+         * @param {boolean} isConfirm - If true, adds a 'Cancel' button and expects a callback.
+         * @param {function} onConfirmCallback - Callback function to execute if 'OK' is clicked in a confirm box.
+         */
+        function showMessageBox(title, message, isConfirm = false, onConfirmCallback = null) {
+            const msgBox = document.getElementById('messageBox');
+            const msgBoxTitle = document.getElementById('messageBoxTitle');
+            const msgBoxContent = document.getElementById('messageBoxContent');
+            const okButton = msgBox.querySelector('button');
+            let cancelButton = msgBox.querySelector('.cancel-button');
+
+            msgBoxTitle.textContent = title;
+            msgBoxContent.textContent = message;
+
+            okButton.textContent = 'OK';
+            okButton.onclick = () => {
+                msgBox.classList.remove('show');
+            };
+
+            if (cancelButton) {
+                cancelButton.remove();
+            }
+
+            if (isConfirm) {
+                okButton.onclick = () => {
+                    msgBox.classList.remove('show');
+                    if (onConfirmCallback) {
+                        onConfirmCallback();
+                    }
+                };
+
+                cancelButton = document.createElement('button');
+                cancelButton.textContent = 'Cancel';
+                cancelButton.className = 'cancel-button bg-gray-500 hover:bg-gray-600 text-white p-2 rounded-md cursor-pointer transition ml-2';
+                cancelButton.onclick = () => {
+                    msgBox.classList.remove('show');
+                };
+                okButton.parentNode.insertBefore(cancelButton, okButton.nextSibling);
+            }
+
+            msgBox.classList.add('show');
+            if (!isConfirm) {
+                setTimeout(() => {
+                    msgBox.classList.remove('show');
+                }, 3000);
+            }
+        }
+        window.showMessageBox = showMessageBox; // Make it globally accessible
+
+        /**
+         * Switches the active configuration tab.
+         * @param {string} tabName - The name of the tab to activate (e.g., 'switch_configs').
+         */
+        async function switchConfigTab(tabName) {
+            console.log(`Switching to tab: ${tabName}`);
+            // Deactivate all tab buttons and content
+            document.querySelectorAll('.config-tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            document.querySelectorAll('.config-tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+
+            // Activate the selected tab button and content
+            document.getElementById(`tab-button-${tabName}`).classList.add('active');
+            const contentElement = document.getElementById(`tab-content-${tabName}`);
+            contentElement.classList.add('active');
+
+            // Clear any active editing state when switching tabs
+            currentEditingItem = {};
+            resetForm(tabName);
+
+            // Reload data for the active tab
+            await loadConfigs(tabName);
+        }
+        window.switchConfigTab = switchConfigTab; // Make it globally accessible
+
+        /**
+         * Validates a form based on its schema.
+         * @param {string} tabName - The name of the table/tab.
+         * @param {HTMLFormElement} form - The form element to validate.
+         * @returns {boolean} True if the form is valid, false otherwise.
+         */
+        function validateForm(tabName, form) {
+            const schema = tableSchemas[tabName];
+            let isValid = true;
+            form.querySelectorAll('input[required], select[required], textarea[required]').forEach(input => {
+                const errorSpan = document.getElementById(`${tabName}-${input.name}-error`);
+                if (!input.value.trim()) {
+                    isValid = false;
+                    input.classList.add('border-red-500');
+                    if (errorSpan) {
+                        errorSpan.textContent = `${(schema.fields.find(f => f.name === input.name)?.displayAs || input.name)} is required.`;
+                        errorSpan.classList.remove('hidden');
+                    }
+                } else if (input.pattern && !new RegExp(input.pattern).test(input.value)) {
+                    isValid = false;
+                    input.classList.add('border-red-500');
+                    if (errorSpan) {
+                        errorSpan.textContent = input.title || `Invalid format for ${(schema.fields.find(f => f.name === input.name)?.displayAs || input.name)}.`;
+                        errorSpan.classList.remove('hidden');
+                    }
+                } else {
+                    input.classList.remove('border-red-500');
+                    if (errorSpan) errorSpan.classList.add('hidden');
+                }
+            });
+            return isValid;
+        }
+
+        /**
+         * Resets a form and clears validation messages.
+         * @param {string} tabName - The name of the table/tab.
+         */
+        function resetForm(tabName) {
+            const form = document.getElementById(`${tabName}-form`);
+            if (form) {
+                form.reset();
+                // Clear validation errors
+                form.querySelectorAll('.validation-error').forEach(span => {
+                    span.classList.add('hidden');
+                });
+                form.querySelectorAll('input, select, textarea').forEach(input => {
+                    input.classList.remove('border-red-500');
+                });
+
+                // Reset button text
+                const submitButton = form.querySelector('button[type="submit"]');
+                if (submitButton) {
+                    submitButton.textContent = `Add ${tabName.replace(/_/g, ' ')}`;
+                    submitButton.setAttribute('data-action', 'add');
+                }
+                currentEditingItem = {}; // Clear editing state
+            }
+        }
+        window.resetForm = resetForm; // Make it globally accessible
+
+        /**
+         * Dynamically generates a form for adding/editing data for a given table.
+         * @param {string} tabName - The name of the table.
+         * @param {object} [dataToEdit] - Optional data to pre-fill the form for editing.
+         * @returns {string} The HTML string for the form.
+         */
+        function generateFormHtml(tabName, dataToEdit = {}) {
+            const schema = tableSchemas[tabName];
+            if (!schema) return '';
+
+            let formHtml = `<div class="config-section"><h3>${dataToEdit[schema.primaryKey] ? 'Edit' : 'Add New'} ${tabName.replace(/_/g, ' ')}</h3><form id="${tabName}-form" class="config-form" onsubmit="handleFormSubmit(event, '${tabName}')">`;
+
+            schema.fields.forEach(field => {
+                const value = dataToEdit[field.name] !== undefined ? dataToEdit[field.name] : '';
+                const fieldId = `${tabName}-${field.name}`;
+                const displayLabel = field.displayAs || field.name.replace(/_/g, ' ');
+                const requiredAttr = field.required ? 'required' : '';
+                const patternAttr = field.pattern ? `pattern="${field.pattern}"` : '';
+                const titleAttr = field.title ? `title="${field.title}"` : '';
+                const readOnlyAttr = dataToEdit[schema.primaryKey] && !field.editable ? 'readonly' : ''; // Primary key and non-editable fields are readonly during edit
+                const placeholderAttr = field.placeholder ? `placeholder="${field.placeholder}"` : '';
+
+                formHtml += `<div class="form-group">`;
+                formHtml += `<label for="${fieldId}">${displayLabel}:</label>`;
+                if (field.type === 'select') {
+                    formHtml += `<select id="${fieldId}" name="${field.name}" ${requiredAttr} ${readOnlyAttr}>`;
+                    formHtml += `<option value="">Select ${displayLabel}</option>`;
+                    (field.options || []).forEach(option => {
+                        const selected = (value == option.value) ? 'selected' : '';
+                        formHtml += `<option value="${option.value}" ${selected}>${option.text}</option>`;
+                    });
+                    formHtml += `</select>`;
+                } else if (field.type === 'textarea') {
+                    formHtml += `<textarea id="${fieldId}" name="${field.name}" ${requiredAttr} ${readOnlyAttr} ${placeholderAttr} rows="3">${value}</textarea>`;
+                } else {
+                    formHtml += `<input type="${field.type}" id="${fieldId}" name="${field.name}" value="${value}" ${requiredAttr} ${patternAttr} ${titleAttr} ${readOnlyAttr} ${placeholderAttr}>`;
+                }
+                formHtml += `<span id="${fieldId}-error" class="validation-error hidden"></span>`;
+                formHtml += `</div>`;
+            });
+
+            formHtml += `<button type="submit" data-action="${dataToEdit[schema.primaryKey] ? 'update' : 'add'}">${dataToEdit[schema.primaryKey] ? 'Update' : 'Add'} ${tabName.replace(/_/g, ' ')}</button>`;
+            if (dataToEdit[schema.primaryKey]) {
+                formHtml += `<button type="button" class="ml-2 bg-gray-500 hover:bg-gray-600" onclick="resetForm('${tabName}')">Cancel Edit</button>`;
+            }
+            formHtml += `</form></div>`;
+            return formHtml;
+        }
+
+        /**
+         * Dynamically generates a table for displaying data for a given table.
+         * @param {string} tabName - The name of the table.
+         * @param {Array<object>} data - The array of data objects to display.
+         * @returns {string} The HTML string for the table.
+         */
+        function generateTableHtml(tabName, data) {
+            const schema = tableSchemas[tabName];
+            if (!schema || data.length === 0) {
+                return `<div class="config-section"><h3>Existing ${tabName.replace(/_/g, ' ')} Configurations</h3><p class="text-gray-400">No ${tabName.replace(/_/g, ' ')} configurations found.</p></div>`;
+            }
+
+            let tableHtml = `<div class="config-section"><h3>Existing ${tabName.replace(/_/g, ' ')} Configurations</h3><div class="config-table-container"><table class="config-table"><thead><tr>`;
+
+            // Table Headers
+            schema.fields.forEach(field => {
+                if (field.visibleInTable !== false) { // By default, all fields are visible unless explicitly set to false
+                    tableHtml += `<th>${field.displayAs || field.name.replace(/_/g, ' ')}</th>`;
+                }
+            });
+            tableHtml += `<th>Actions</th>`; // Actions column
+            tableHtml += `</tr></thead><tbody>`;
+
+            // Table Rows
+            data.forEach(item => {
+                tableHtml += `<tr>`;
+                schema.fields.forEach(field => {
+                    if (field.visibleInTable !== false) {
+                        let displayValue = item[field.name];
+                        // Mask password fields
+                        if (field.type === 'password' && displayValue) {
+                            displayValue = '********';
+                        }
+                        tableHtml += `<td>${displayValue || ''}</td>`;
+                    }
+                });
+                tableHtml += `<td>
+                                <button class="edit-button" onclick="editConfig('${tabName}', '${item[schema.primaryKey]}')">Edit</button>
+                                <button onclick="deleteConfig('${tabName}', '${item[schema.primaryKey]}')">Delete</button>
+                              </td>`;
+                tableHtml += `</tr>`;
+
+                // If there are nested tables, generate rows for them
+                if (schema.nestedTables && schema.nestedTables.length > 0) {
+                    schema.nestedTables.forEach(nestedTableName => {
+                        const nestedSchema = tableSchemas[nestedTableName];
+                        if (nestedSchema && nestedSchema.nestedTable.parentTable === tabName) {
+                            const nestedData = configs[nestedTableName].filter(nestedItem => nestedItem[nestedSchema.nestedTable.foreignKey] == item[schema.primaryKey]); // Using == for type coercion
+                            if (nestedData.length > 0) {
+                                tableHtml += `<tr><td colspan="${schema.fields.filter(f => f.visibleInTable !== false).length + 1}">
+                                    <div class="ml-4 mt-2 mb-2 p-2 bg-gray-700 rounded-md">
+                                        <h4 class="text-blue-300 font-semibold mb-2">${nestedTableName.replace(/_/g, ' ')} for ${item[schema.primaryKey]}</h4>
+                                        ${generateNestedFormHtml(nestedTableName, item[schema.primaryKey])}
+                                        ${generateNestedTableHtml(nestedTableName, nestedData)}
+                                    </div>
+                                </td></tr>`;
+                            } else {
+                                tableHtml += `<tr><td colspan="${schema.fields.filter(f => f.visibleInTable !== false).length + 1}">
+                                    <div class="ml-4 mt-2 mb-2 p-2 bg-gray-700 rounded-md">
+                                        <h4 class="text-blue-300 font-semibold mb-2">${nestedTableName.replace(/_/g, ' ')} for ${item[schema.primaryKey]}</h4>
+                                        ${generateNestedFormHtml(nestedTableName, item[schema.primaryKey])}
+                                        <p class="text-gray-400 text-sm ml-2">No ${nestedTableName.replace(/_/g, ' ')} found.</p>
+                                    </div>
+                                </td></tr>`;
+                            }
+                        }
+                    });
+                }
+            });
+
+            tableHtml += `</tbody></table></div></div>`;
+            return tableHtml;
+        }
+
+        /**
+         * Generates a form for adding data to a nested table.
+         * @param {string} nestedTableName - The name of the nested table.
+         * @param {string} parentId - The primary key of the parent item.
+         * @returns {string} The HTML string for the nested form.
+         */
+        function generateNestedFormHtml(nestedTableName, parentId) {
+            const schema = tableSchemas[nestedTableName];
+            if (!schema || !schema.nestedTable) return '';
+
+            let formHtml = `<form id="${nestedTableName}-${parentId}-form" class="config-form" onsubmit="handleNestedFormSubmit(event, '${nestedTableName}', '${parentId}')">`;
+            formHtml += `<h5 class="text-md font-medium text-blue-200">Add New ${nestedTableName.replace(/_/g, ' ')}</h5>`;
+
+            schema.fields.forEach(field => {
+                if (field.name === schema.nestedTable.foreignKey) {
+                    // Pre-fill foreign key and make it readonly
+                    formHtml += `<div class="form-group">`;
+                    formHtml += `<label for="${nestedTableName}-${parentId}-${field.name}">${field.displayAs || field.name.replace(/_/g, ' ')}:</label>`;
+                    formHtml += `<input type="text" id="${nestedTableName}-${parentId}-${field.name}" name="${field.name}" value="${parentId}" readonly required>`;
+                    formHtml += `</div>`;
+                } else {
+                    const fieldId = `${nestedTableName}-${parentId}-${field.name}`;
+                    const displayLabel = field.displayAs || field.name.replace(/_/g, ' ');
+                    const requiredAttr = field.required ? 'required' : '';
+                    formHtml += `<div class="form-group">`;
+                    formHtml += `<label for="${fieldId}">${displayLabel}:</label>`;
+                    formHtml += `<input type="${field.type}" id="${fieldId}" name="${field.name}" ${requiredAttr}>`;
+                    formHtml += `<span id="${fieldId}-error" class="validation-error hidden"></span>`;
+                    formHtml += `</div>`;
+                }
+            });
+            formHtml += `<button type="submit">Add ${nestedTableName.replace(/_/g, ' ')}</button>`;
+            formHtml += `</form>`;
+            return formHtml;
+        }
+
+
+        /**
+         * Dynamically generates a table for displaying data for a nested table.
+         * @param {string} nestedTableName - The name of the nested table.
+         * @param {Array<object>} data - The array of nested data objects to display.
+         * @returns {string} The HTML string for the nested table.
+         */
+        function generateNestedTableHtml(nestedTableName, data) {
+            const schema = tableSchemas[nestedTableName];
+            if (!schema || data.length === 0) return '';
+
+            let tableHtml = `<div class="config-table-container mt-4"><table class="config-table"><thead><tr>`;
+
+            schema.fields.forEach(field => {
+                if (field.visibleInTable !== false) {
+                    tableHtml += `<th>${field.displayAs || field.name.replace(/_/g, ' ')}</th>`;
+                }
+            });
+            tableHtml += `<th>Actions</th>`;
+            tableHtml += `</tr></thead><tbody>`;
+
+            data.forEach(item => {
+                tableHtml += `<tr>`;
+                schema.fields.forEach(field => {
+                    if (field.visibleInTable !== false) {
+                        tableHtml += `<td>${item[field.name] || ''}</td>`;
+                    }
+                });
+                tableHtml += `<td>
+                                <button onclick="deleteConfig('${nestedTableName}', '${item[schema.primaryKey]}')">Delete</button>
+                              </td>`;
+                tableHtml += `</tr>`;
+            });
+
+            tableHtml += `</tbody></table></div>`;
+            return tableHtml;
+        }
+
+
+        /**
+         * Handles form submission for adding/updating configurations.
+         * @param {Event} event - The form submission event.
+         * @param {string} tabName - The name of the table/tab.
+         */
+        async function handleFormSubmit(event, tabName) {
+            event.preventDefault();
+            const form = event.target;
+            if (!validateForm(tabName, form)) {
+                showMessageBox("Validation Error", "Please fill in all mandatory fields correctly.");
+                return;
+            }
+
+            const schema = tableSchemas[tabName];
+            const formData = {};
+            schema.fields.forEach(field => {
+                formData[field.name] = form.elements[`${tabName}-${field.name}`].value;
+            });
+
+            const action = form.querySelector('button[type="submit"]').getAttribute('data-action');
+            const primaryKeyValue = currentEditingItem[schema.primaryKey] || formData[schema.primaryKey]; // Use currentEditingItem's PK if editing
+
+            let endpoint = '';
+            let method = '';
+            let message = '';
+            let payload = {};
+
+            if (action === 'add') {
+                if (tabName === 'global_configs' && !formData.config_id) {
+                    // Auto-generate config_id for global_configs if not provided
+                    formData.config_id = `global-${Date.now()}`;
+                }
+                endpoint = `${API_BASE_URL}/add_${tabName}`;
+                method = 'POST';
+                payload = formData; // Send all fields for add
+                message = `${tabName.replace(/_/g, ' ')} added successfully!`;
+            } else if (action === 'update') {
+                endpoint = `${API_BASE_URL}/update_${tabName}`;
+                method = 'PUT';
+                // For update, payload should include the primary key and all updated fields
+                payload = { ...formData, [schema.primaryKey]: primaryKeyValue };
+                message = `${tabName.replace(/_/g, ' ')} updated successfully!`;
+            }
+
+            console.log(`Submitting form for ${tabName}: Action='${action}', Payload:`, payload);
+
+            try {
+                const response = await fetch(endpoint, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `Failed to ${action} ${tabName.replace(/_/g, ' ')}`);
+                }
+
+                showMessageBox("Success", message);
+                resetForm(tabName);
+                await loadConfigs(tabName); // Reload data after successful operation
+
+            } catch (error) {
+                console.error(`Error ${action}ing config for ${tabName}:`, error);
+                showMessageBox("Error", `Failed to ${action} ${tabName.replace(/_/g, ' ')}. ${error.message}`);
+            }
+        }
+        window.handleFormSubmit = handleFormSubmit; // Make it globally accessible
+
+        /**
+         * Handles form submission for adding configurations to nested tables.
+         * @param {Event} event - The form submission event.
+         * @param {string} nestedTableName - The name of the nested table.
+         * @param {string} parentId - The primary key of the parent item.
+         */
+        async function handleNestedFormSubmit(event, nestedTableName, parentId) {
+            event.preventDefault();
+            const form = event.target;
+
+            // Simple validation for nested forms (can be expanded)
+            let isValid = true;
+            const formData = {};
+            const schema = tableSchemas[nestedTableName];
+
+            schema.fields.forEach(field => {
+                const inputElement = form.elements[`${nestedTableName}-${parentId}-${field.name}`];
+                if (inputElement) {
+                    formData[field.name] = inputElement.value;
+                    if (field.required && !inputElement.value.trim()) {
+                        isValid = false;
+                        inputElement.classList.add('border-red-500');
+                        const errorSpan = document.getElementById(`${nestedTableName}-${parentId}-${field.name}-error`);
+                        if (errorSpan) {
+                            errorSpan.textContent = `${field.displayAs || field.name.replace(/_/g, ' ')} is required.`;
+                            errorSpan.classList.remove('hidden');
+                        }
+                    } else {
+                        inputElement.classList.remove('border-red-500');
+                        const errorSpan = document.getElementById(`${nestedTableName}-${parentId}-${field.name}-error`);
+                        if (errorSpan) errorSpan.classList.add('hidden');
+                    }
+                }
+            });
+
+            if (!isValid) {
+                showMessageBox("Validation Error", "Please fill in all mandatory fields for the nested configuration.");
+                return;
+            }
+
+            // Ensure the foreign key is correctly set
+            formData[schema.nestedTable.foreignKey] = parentId;
+
+            const endpoint = `${API_BASE_URL}/add_${nestedTableName}`;
+            const method = 'POST';
+
+            console.log(`Submitting nested form for ${nestedTableName}: Parent ID='${parentId}', Payload:`, formData);
+
+            try {
+                const response = await fetch(endpoint, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `Failed to add ${nestedTableName.replace(/_/g, ' ')}`);
+                }
+
+                showMessageBox("Success", `${nestedTableName.replace(/_/g, ' ')} added successfully!`);
+                form.reset(); // Reset the nested form
+
+                // Re-load both the parent and nested configs to refresh the view
+                await loadConfigs(schema.nestedTable.parentTable);
+                await loadConfigs(nestedTableName);
+
+            } catch (error) {
+                console.error(`Error adding nested config for ${nestedTableName}:`, error);
+                showMessageBox("Error", `Failed to add ${nestedTableName.replace(/_/g, ' ')}. ${error.message}`);
+            }
+        }
+        window.handleNestedFormSubmit = handleNestedFormSubmit; // Make it globally accessible
+
+        /**
+         * Loads existing configurations for a given table from the backend.
+         * @param {string} tabName - The name of the table.
+         */
+        async function loadConfigs(tabName) {
+            console.log(`Loading configurations for: ${tabName}`);
+            const schema = tableSchemas[tabName];
+            if (!schema || !schema.getFunction) {
+                console.warn(`No getFunction defined for ${tabName} or schema not found.`);
+                return;
+            }
+
+            let endpoint = `${API_BASE_URL}/${schema.getFunction}`;
+
+            // Handle specific cases where get function requires parameters (e.g., windows_services, windows_processes)
+            if (schema.nestedTable) {
+                 // For nested tables, we don't call their getFunction directly here
+                 // The data will be filtered from the main configs[nestedTableName] array
+                 // after all data is fetched.
+                 console.log(`Skipping direct fetch for nested table ${tabName}. Data will be filtered from parent.`);
+                 return;
+            }
+
+            try {
+                const response = await fetch(endpoint);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `Failed to fetch ${tabName.replace(/_/g, ' ')} configurations.`);
+                }
+                const data = await response.json();
+
+                // Store fetched data globally
+                // The API responses are structured differently for each table,
+                // so we need to check the key (e.g., 'switches', 'kmx_configs')
+                if (data.switches) {
+                    configs[tabName] = data.switches;
+                } else if (data.kmx_configs) {
+                    configs[tabName] = data.kmx_configs;
+                } else if (data.ird_configs) {
+                    configs[tabName] = data.ird_configs;
+                } else if (data.windows_configs) {
+                    configs[tabName] = data.windows_configs;
+                } else if (data.global_configs) {
+                    configs[tabName] = data.global_configs;
+                } else if (data.channels) {
+                    configs[tabName] = data.channels;
+                } else if (data.device_ips) {
+                    configs[tabName] = data.device_ips;
+                } else if (data.pgm_configs) {
+                    configs[tabName] = data.pgm_configs;
+                } else if (data.playoutmv_configs) {
+                    configs[tabName] = data.playoutmv_configs;
+                } else if (data.windows_services) { // For direct fetch of windows_services
+                    configs[tabName] = data.windows_services;
+                } else if (data.windows_processes) { // For direct fetch of windows_processes
+                    configs[tabName] = data.windows_processes;
+                }
+                // Default to raw data if no specific key found, assuming it's an array
+                else if (Array.isArray(data)) {
+                    configs[tabName] = data;
+                } else {
+                    configs[tabName] = []; // Clear if unexpected format
+                    console.warn(`Unexpected data format for ${tabName}:`, data);
+                }
+
+                console.log(`Loaded ${configs[tabName].length} items for ${tabName}.`);
+                renderTabContent(tabName); // Re-render the content for the current tab
+            } catch (error) {
+                console.error(`Error loading configs for ${tabName}:`, error);
+                showMessageBox("Error", `Failed to load ${tabName.replace(/_/g, ' ')} configurations. ${error.message}`);
+            }
+        }
+        window.loadConfigs = loadConfigs; // Make it globally accessible
+
+        /**
+         * Fetches all configurations from the backend. This is called once on page load.
+         */
+        async function fetchAllConfigs() {
+            console.log("Fetching all configurations from backend...");
+            const fetchPromises = [];
+            for (const tabName in tableSchemas) {
+                const schema = tableSchemas[tabName];
+                if (schema.getFunction && !schema.nestedTable) { // Only fetch top-level tables directly
+                    fetchPromises.push(loadConfigs(tabName));
+                }
+            }
+            // Also fetch nested table data separately for global access if needed
+            if (tableSchemas.windows_services && tableSchemas.windows_services.getFunction) {
+                fetchPromises.push(loadWindowsServicesGlobally());
+            }
+            if (tableSchemas.windows_processes && tableSchemas.windows_processes.getFunction) {
+                fetchPromises.push(loadWindowsProcessesGlobally());
+            }
+
+            await Promise.all(fetchPromises);
+            console.log("All configurations fetched.");
+        }
+
+        /**
+         * Loads windows_services globally for filtering in parent table.
+         */
+        async function loadWindowsServicesGlobally() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/get_windows_services_all`); // Assuming an API to get all services
+                if (!response.ok) throw new Error('Failed to fetch all windows services.');
+                const data = await response.json();
+                configs.windows_services = data.windows_services || [];
+                console.log(`Loaded ${configs.windows_services.length} global windows services.`);
+            } catch (error) {
+                console.error("Error loading all windows services:", error);
+            }
+        }
+
+        /**
+         * Loads windows_processes globally for filtering in parent table.
+         */
+        async function loadWindowsProcessesGlobally() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/get_windows_processes_all`); // Assuming an API to get all processes
+                if (!response.ok) throw new Error('Failed to fetch all windows processes.');
+                const data = await response.json();
+                configs.windows_processes = data.windows_processes || [];
+                console.log(`Loaded ${configs.windows_processes.length} global windows processes.`);
+            } catch (error) {
+                console.error("Error loading all windows processes:", error);
+            }
+        }
+
+
+        /**
+         * Edits an existing configuration item.
+         * @param {string} tabName - The name of the table/tab.
+         * @param {string} primaryKeyValue - The primary key value of the item to edit.
+         */
+        function editConfig(tabName, primaryKeyValue) {
+            const schema = tableSchemas[tabName];
+            if (!schema) {
+                showMessageBox("Error", "Schema not found for this table.");
+                return;
+            }
+
+            const itemToEdit = configs[tabName].find(item => String(item[schema.primaryKey]) === String(primaryKeyValue));
+            if (!itemToEdit) {
+                showMessageBox("Error", "Item not found for editing.");
+                return;
+            }
+
+            currentEditingItem = { ...itemToEdit }; // Store a copy of the item being edited
+
+            // Re-render the form section with the data to edit
+            const formContainer = document.getElementById(`${tabName}-form-container`);
+            if (formContainer) {
+                formContainer.innerHTML = generateFormHtml(tabName, currentEditingItem);
+            }
+            // Scroll to the form
+            window.scrollTo({
+                top: formContainer.offsetTop,
+                behavior: 'smooth'
+            });
+
+            // Change button text to "Update"
+            const submitButton = document.getElementById(`${tabName}-form`).querySelector('button[type="submit"]');
+            submitButton.textContent = `Update ${tabName.replace(/_/g, ' ')}`;
+            submitButton.setAttribute('data-action', 'update');
+
+            showMessageBox("Info", `Now editing configuration for ${primaryKeyValue}.`);
+        }
+        window.editConfig = editConfig; // Make it globally accessible
+
+        /**
+         * Deletes a configuration item.
+         * @param {string} tabName - The name of the table/tab.
+         * @param {string} primaryKeyValue - The primary key value of the item to delete.
+         */
+        function deleteConfig(tabName, primaryKeyValue) {
+            const schema = tableSchemas[tabName];
+            if (!schema || !schema.deleteFunction) {
+                showMessageBox("Error", "Delete function or schema not found for this table.");
+                return;
+            }
+
+            showMessageBox("Confirm Deletion", `Are you sure you want to delete this ${tabName.replace(/_/g, ' ')} configuration?`, true, async () => {
+                const endpoint = `${API_BASE_URL}/delete_${tabName}`;
+                const method = 'DELETE';
+                const payload = { [schema.primaryKey]: primaryKeyValue };
+
+                console.log(`Deleting config for ${tabName}: Payload:`, payload);
+
+                try {
+                    const response = await fetch(endpoint, {
+                        method: method,
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `Failed to delete ${tabName.replace(/_/g, ' ')}.`);
+                    }
+
+                    showMessageBox("Success", `${tabName.replace(/_/g, ' ')} deleted successfully!`);
+                    await loadConfigs(tabName); // Reload data after successful deletion
+
+                    // If a parent table had nested items deleted, re-render it too
+                    if (schema.nestedTable) {
+                        await loadConfigs(schema.nestedTable.parentTable);
+                    }
+                } catch (error) {
+                    console.error(`Error deleting config for ${tabName}:`, error);
+                    showMessageBox("Error", `Failed to delete ${tabName.replace(/_/g, ' ')}. ${error.message}`);
+                }
+            });
+        }
+        window.deleteConfig = deleteConfig; // Make it globally accessible
+
+        /**
+         * Renders the content (form and table) for a specific tab.
+         * @param {string} tabName - The name of the table/tab.
+         */
+        function renderTabContent(tabName) {
+            const contentContainer = document.getElementById(`tab-content-${tabName}`);
+            if (!contentContainer) return;
+
+            contentContainer.innerHTML = `
+                <div id="${tabName}-form-container">
+                    ${generateFormHtml(tabName)}
+                </div>
+                <div id="${tabName}-table-container">
+                    ${generateTableHtml(tabName, configs[tabName])}
+                </div>
+            `;
+        }
+
+        /**
+         * Initializes the config page: creates tabs and their initial content.
+         */
+        async function initializeConfigPage() {
+            const tabsContainer = document.querySelector('.config-tabs');
+            const contentContainer = document.getElementById('config-tab-content-container');
+
+            // Generate tabs and content containers
+            for (const tabName in tableSchemas) {
+                // Skip nested tables as separate top-level tabs
+                if (tableSchemas[tabName].nestedTable) continue;
+
+                const button = document.createElement('button');
+                button.id = `tab-button-${tabName}`;
+                button.className = 'config-tab-button';
+                button.textContent = tabName.replace(/_/g, ' ');
+                button.onclick = () => switchConfigTab(tabName);
+                tabsContainer.appendChild(button);
+
+                const tabContentDiv = document.createElement('div');
+                tabContentDiv.id = `tab-content-${tabName}`;
+                tabContentDiv.className = 'config-tab-content';
+                contentContainer.appendChild(tabContentDiv);
+            }
+
+            // Fetch all initial data
+            await fetchAllConfigs();
+
+            // Activate the first tab by default after fetching all data
+            const firstTabName = Object.keys(tableSchemas).find(key => !tableSchemas[key].nestedTable);
+            if (firstTabName) {
+                switchConfigTab(firstTabName);
+            }
+        }
+
+        // Initialize the configuration page when the window loads
+        window.onload = initializeConfigPage;
+    </script>
+</body>
+</html>

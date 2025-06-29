@@ -68,3 +68,27 @@ curl -X PUT "http://192.168.56.30:9200/ird_configurations" -H "Content-Type: app
   }
 }'
 ```
+
+```
+curl -X PUT "http://192.168.56.30:9200/switch_overview" -H 'Content-Type: application/json' -d '{
+  "mappings": {
+    "properties": {
+      "switch_ip": { "type": "keyword" },
+      "hostname": { "type": "keyword" },
+      "interfaces": {
+        "type": "nested",
+        "properties": {
+          "name": { "type": "keyword" },
+          "alias": { "type": "text" },
+          "admin_status": { "type": "keyword" },
+          "oper_status": { "type": "keyword" },
+          "vlan": { "type": "integer" },
+          "input_octets": { "type": "long" },
+          "output_octets": { "type": "long" }
+        }
+      },
+      "timestamp": { "type": "date" }
+    }
+  }
+}'
+```

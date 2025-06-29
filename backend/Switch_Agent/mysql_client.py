@@ -351,3 +351,31 @@ class MySQLManager:
         query = "DELETE FROM playoutmv_configs WHERE id = %s"
         return self._execute_query(query, (config_id,), commit=True)
 
+    # --- NEW: CRUD operations for switch_configs ---
+    def add_switch_config(self, switch_ip, hostname, domain, community, model, frontend_block_id):
+        query = """
+            INSERT INTO switch_configs (switch_ip, hostname, domain, community, model, frontend_block_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        params = (switch_ip, hostname, domain, community, model, frontend_block_id)
+        return self._execute_query(query, params, commit=True)
+
+    def get_switch_configs(self):
+        query = "SELECT switch_ip, hostname, domain, community, model, frontend_block_id FROM switch_configs limit 30"
+        return self._execute_query(query, fetch_all=True)
+
+    def get_switch_config_by_ip(self, switch_ip):
+        query = "SELECT switch_ip, hostname, domain, community, model, frontend_block_id FROM switch_configs WHERE switch_ip = %s"
+        return self._execute_query(query, (switch_ip,), fetch_one=True)
+
+    def update_switch_config(self, switch_ip, hostname, domain, community, model, frontend_block_id):
+        query = """
+            UPDATE switch_configs SET hostname = %s, domain = %s, community = %s, model = %s, frontend_block_id = %s
+            WHERE switch_ip = %s
+        """
+        params = (hostname, domain, community, model, frontend_block_id, switch_ip)
+        return self._execute_query(query, params, commit=True)
+
+    def delete_switch_config(self, switch_ip):
+        query = "DELETE FROM switch_configs WHERE switch_ip = %s"
+        return self._execute_query(query, (switch_ip,), commit=True)

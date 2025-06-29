@@ -9,13 +9,14 @@ from pysnmp.hlapi.v1arch.asyncio import (
     SnmpDispatcher,
 )
 from pysnmp.proto import rfc1902 # For Null object check
-import asyncio # Explicitly import asyncio for async operations if needed outside hlapi
-import re # NEW: Import the regex module
+import asyncio # Explicitly import asyncio for async operations
+import re # Import the regex module
 import os # For environment variables
 import redis # For Redis caching
 import json # For JSON serialization
 
 # Set to INFO for less verbose logging in production
+# For performance in production, consider setting this to WARNING or ERROR.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class KMXAPIClient:
@@ -157,7 +158,7 @@ class KMXAPIClient:
         """
         Performs a filtered SNMP walk based on severity OID and consolidates data,
         mirroring the Java SnmpWalkController's logic.
-        This function is now asynchronous.
+        This function is now asynchronous and optimized for concurrent SNMP GETs.
         """
         final_results = []
         child_ids = set()
@@ -268,62 +269,97 @@ class KMXAPIClient:
             logging.warning(f"No child IDs found during severity OID walk for {ip}. No alarms to process.")
             return final_results
 
-        # 2. Now, for each collected child ID, perform specific GETs and apply filtering
-        for child_id_str in sorted(list(child_ids), key=int): # Keep child_id as string for display
-            # NEW FILTER: Skip if this component's ID was found to be disabled
+        # --- OPTIMIZATION: Collect all SNMP GET tasks and run them concurrently ---
+        snmp_get_tasks = []
+        child_id_to_oids_map = {} # To map results back to child_id and OID type
+
+        for child_id_str in sorted(list(child_ids), key=int):
+            # Skip if this component's ID was found to be disabled (optimization to avoid unnecessary GETs)
             if child_id_str in disabled_component_ids:
                 logging.info(f"Skipping alarm check for component ID '{child_id_str}' as it is disabled.")
                 continue
 
-            child_id_int = int(child_id_str) # Convert to int for tuple concatenation
+            child_id_int = int(child_id_str)
 
-            # Construct OIDs as tuples for robust ObjectIdentity initialization
-            current_severity_oid_tuple = base_oid_tuple + (3, child_id_int) # .3 for alarm status/severity
-            current_device_name_oid_tuple = base_oid_tuple + (2, child_id_int) # .2 for alarm friendly name
-            current_actual_value_oid_tuple = base_oid_tuple + (5, child_id_int) # .5 for alarm cause/message
+            current_severity_oid_tuple = base_oid_tuple + (3, child_id_int)
+            current_device_name_oid_tuple = base_oid_tuple + (2, child_id_int)
+            current_actual_value_oid_tuple = base_oid_tuple + (5, child_id_int)
 
-            # For logging and 'oid' field in results, use the consistently cleaned base OID
             original_severity_oid_str = f"{cleaned_base_oid_str}.3.{child_id_str}"
             original_device_name_oid_str = f"{cleaned_base_oid_str}.2.{child_id_str}"
             original_actual_value_oid_str = f"{cleaned_base_oid_str}.5.{child_id_str}"
 
+            # Create tasks for concurrent execution
+            snmp_get_tasks.append(
+                self._get_snmp_value(ip, community, current_severity_oid_tuple, original_severity_oid_str)
+            )
+            snmp_get_tasks.append(
+                self._get_snmp_value(ip, community, current_device_name_oid_tuple, original_device_name_oid_str)
+            )
+            snmp_get_tasks.append(
+                self._get_snmp_value(ip, community, current_actual_value_oid_tuple, original_actual_value_oid_str)
+            )
 
-            logging.debug(f"DEBUG: Processing child ID {child_id_str} for IP: {ip}")
-            logging.debug(f"DEBUG:   Calling _get_snmp_value for Severity OID (tuple): {current_severity_oid_tuple}, String: {original_severity_oid_str}")
-            severity_result = await self._get_snmp_value(ip, community, current_severity_oid_tuple, original_severity_oid_str)
+            # Map the current child_id_str to the indices of its corresponding tasks
+            # This allows us to retrieve the correct results after asyncio.gather
+            # The indices will be (len(snmp_get_tasks) - 3) for severity, -2 for device_name, -1 for actual_value
+            child_id_to_oids_map[child_id_str] = {
+                "severity_idx": len(snmp_get_tasks) - 3,
+                "device_name_idx": len(snmp_get_tasks) - 2,
+                "actual_value_idx": len(snmp_get_tasks) - 1,
+                "original_severity_oid_str": original_severity_oid_str # Store for final result
+            }
+
+        logging.info(f"Collecting {len(snmp_get_tasks)} SNMP GET tasks for concurrent execution for {ip}.")
+        # Run all collected SNMP GET tasks concurrently
+        all_results = await asyncio.gather(*snmp_get_tasks, return_exceptions=True) # return_exceptions to handle individual task failures
+
+        logging.info(f"Completed concurrent SNMP GETs for {ip}. Processing results.")
+
+        # Process results and apply filtering/alarm logic (original logic remains)
+        for child_id_str in sorted(list(child_id_to_oids_map.keys()), key=int):
+            mapping = child_id_to_oids_map[child_id_str]
             
-            # Always fetch device_name and actual_value to apply new custom logic
-            logging.debug(f"DEBUG:   Calling _get_snmp_value for Device Name OID (tuple): {current_device_name_oid_tuple}, String: {original_device_name_oid_str}")
-            device_name_result = await self._get_snmp_value(ip, community, current_device_name_oid_tuple, original_device_name_oid_str)
-            device_name = device_name_result.get("value") # Get raw value for "HCO" and "PGM" checks
+            # Retrieve results using stored indices
+            severity_result = all_results[mapping["severity_idx"]]
+            device_name_result = all_results[mapping["device_name_idx"]]
+            actual_value_result = all_results[mapping["actual_value_idx"]]
+            original_severity_oid_str = mapping["original_severity_oid_str"] # Get the original OID string
 
-            logging.debug(f"DEBUG:   Calling _get_snmp_value for Actual Value OID (tuple): {current_actual_value_oid_tuple}, String: {original_actual_value_oid_str}")
-            actual_value_result = await self._get_snmp_value(ip, community, current_actual_value_oid_tuple, original_actual_value_oid_str)
-            actual_value = actual_value_result.get("value", "") # Get raw value for "source *" check
+            # Check for exceptions from concurrent tasks
+            if isinstance(severity_result, Exception):
+                logging.error(f"Error fetching severity for child ID {child_id_str}: {severity_result}")
+                severity_result = {"value": "N/A", "interpreted": "N/A", "status": "Error"}
+            if isinstance(device_name_result, Exception):
+                logging.error(f"Error fetching device name for child ID {child_id_str}: {device_name_result}")
+                device_name_result = {"value": "N/A", "interpreted": "N/A", "status": "Error"}
+            if isinstance(actual_value_result, Exception):
+                logging.error(f"Error fetching actual value for child ID {child_id_str}: {actual_value_result}")
+                actual_value_result = {"value": "N/A", "interpreted": "N/A", "status": "Error"}
 
-            # --- NEW: ALARM FILTERING/SUPPRESSION LOGIC (PREVENTS ADDING TO final_results) ---
+            device_name = device_name_result.get("value")
+            actual_value = actual_value_result.get("value", "")
+
+            # --- ALARM FILTERING/SUPPRESSION LOGIC (PREVENTS ADDING TO final_results) ---
             is_device_name_pgm_for_filtering = False
             if device_name:
-                for pattern in self.pgm_patterns_for_filtering: # Use pre-compiled patterns
+                for pattern in self.pgm_patterns_for_filtering:
                     if pattern.search(device_name):
                         is_device_name_pgm_for_filtering = True
                         break
             
-            # Check if actual_value contains "source " for the filtering condition
             contains_source_star_for_filtering = "source " in actual_value
 
-            # If both conditions for filtering are met, skip this alarm completely.
             if is_device_name_pgm_for_filtering and contains_source_star_for_filtering:
                 logging.info(f"Filtered out alarm for PGM-related device '{device_name}' with actual value '{actual_value}' (contains 'source *') for IP {ip}, Child ID {child_id_str}.")
                 continue # Skip processing this alarm and move to the next child_id
-            # --- END NEW ALARM FILTERING/SUPPRESSION LOGIC ---
+            # --- END ALARM FILTERING/SUPPRESSION LOGIC ---
 
 
-            # --- NEW ALARM CONDITION LOGIC (MODIFIED FURTHER, now applies only if not filtered above) ---
-            # Using pre-compiled regex patterns for more robust matching of PGM strings
+            # --- ALARM CONDITION LOGIC (MODIFIED FURTHER, now applies only if not filtered above) ---
             is_pgm_related_in_device_name = False
             if device_name:
-                for pattern in self.pgm_patterns_for_filtering: # Use pre-compiled patterns
+                for pattern in self.pgm_patterns_for_filtering:
                     if pattern.search(device_name):
                         is_pgm_related_in_device_name = True
                         break
@@ -332,7 +368,7 @@ class KMXAPIClient:
 
             actual_value_contains_suppress_pgm_keywords = False
             if actual_value:
-                for pattern in self.suppress_pgm_patterns_in_actual_value: # Use pre-compiled patterns
+                for pattern in self.suppress_pgm_patterns_in_actual_value:
                     if pattern.search(actual_value):
                         actual_value_contains_suppress_pgm_keywords = True
                         break
@@ -346,14 +382,14 @@ class KMXAPIClient:
                 custom_alarm_entry = {
                     "severity": "CRITICAL",
                     "deviceName": device_name_result.get("interpreted", "N/A"),
-                    "actualValue": f"KMX PGM Alarm: {device_name} - {actual_value}", # Adjusted actualValue slightly for clarity
+                    "actualValue": f"KMX PGM Alarm: {device_name} - {actual_value}",
                     "oid": original_severity_oid_str,
                     "status": "Success",
                     "message": f"KMX PGM Alarm: {device_name} - {actual_value}"
                 }
                 final_results.append(custom_alarm_entry)
                 continue
-            # --- END NEW ALARM CONDITION LOGIC ---
+            # --- END ALARM CONDITION LOGIC ---
 
 
             if severity_result.get("value") != "10000": # Only process if not "normal" severity
@@ -365,10 +401,8 @@ class KMXAPIClient:
                         logging.info(f"Skipping alarm for {ip} child ID {child_id_str} due to 'HCO' in device name and actual value is 'source 23;source 23'.")
                         continue # Skip this alarm as requested
                     else:
-                        # If HCO and not "source 23;source 23", then apply the special message
                         special_alarm_message = "HCO is on input 2"
                         logging.info(f"Special HCO alarm message applied for {ip}: {special_alarm_message}")
-                        # Do NOT continue here, allow the alarm to proceed with this special message
                 # --- END UPDATED "HCO" LOGIC ---
 
                 entry = {}
@@ -378,12 +412,12 @@ class KMXAPIClient:
                 final_actual_value = actual_value
                 if "source 23;source 23" == final_actual_value:
                     final_actual_value = ""
-                # Use the special_alarm_message if set, otherwise original logic
                 entry["actualValue"] = special_alarm_message if special_alarm_message else final_actual_value
 
-                entry["oid"] = original_severity_oid_str # Store the original string OID for consistency in results
+                entry["oid"] = original_severity_oid_str
                 
                 status = "Success"
+                # Check individual statuses from the fetched results
                 if ("Error" == severity_result.get("status") or
                     "Error" == device_name_result.get("status") or
                     "Error" == actual_value_result.get("status")):

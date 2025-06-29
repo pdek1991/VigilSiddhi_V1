@@ -4,35 +4,26 @@ import sys
 import os
 import logging
 from datetime import datetime
-import json # <--- ADDED: Import the json module
+import json
 
 # Configure logging for more visibility
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Adjust path to import from the backend directory
-# Assuming project_root is the directory containing both 'frontend' and 'backend'
-# And main.py is inside the 'frontend' directory
 current_file_dir = os.path.dirname(__file__)
-project_root = os.path.abspath(os.path.join(current_file_dir, '..')) # Go up one level from 'frontend'
+project_root = os.path.abspath(os.path.join(current_file_dir, '..'))
 
 sys.path.append(os.path.join(project_root, 'backend'))
-sys.path.append(project_root) # Add project root itself for other potential imports
+sys.path.append(project_root)
 
 # Import your backend classes
 from elastic_client import ElasticManager
 from backend.mysql_client import MySQLManager
-# from ilo_proxy import ILOProxy # Uncomment if needed
-# from ird_monitor import D9800IRD # Uncomment if needed
-# from ird_overview_monitor import D9800IRDOverview # Uncomment if needed
-# from windows_monitor import WindowsMonitor # Uncomment if needed
 
-# --- Flask App Initialization ---
-# By default, Flask looks for templates in a 'templates' folder and static files in a 'static' folder
-# relative to the application's root (which is where main.py resides in this structure).
+
 app = Flask(__name__)
-CORS(app) # Enable CORS for all routes
+CORS(app)
 
-# --- DEBUGGING PATHS (for verification, can be removed in production) ---
 logging.info(f"DEBUG: Flask app instance created. Name: {__name__}")
 logging.info(f"DEBUG: Flask template_folder (default): {app.template_folder}")
 logging.info(f"DEBUG: Flask static_folder (default): {app.static_folder}")
@@ -44,14 +35,12 @@ ES_HOST = os.environ.get('ES_HOST', '192.168.56.30')
 ES_PORT = int(os.environ.get('ES_PORT', 9200))
 es_manager = None
 try:
-    # Correctly pass the hosts as a list of URLs to ElasticManager
     es_manager = ElasticManager(hosts=[f"http://{ES_HOST}:{ES_PORT}"])
     logging.info(f"Elasticsearch Manager initialized for host {ES_HOST}:{ES_PORT}.")
 except Exception as e:
     logging.error(f"Failed to initialize Elasticsearch Manager: {e}. Elasticsearch-dependent features will not function.")
-    # The application might still run, but ES-dependent features will fail.
 finally:
-    if es_manager and es_manager.es and es_manager.es.ping(): # Check es_manager.es as it could be None if init failed earlier
+    if es_manager and es_manager.es and es_manager.es.ping():
         logging.info("Elasticsearch connection confirmed: OK.")
     else:
         logging.warning("Elasticsearch connection failed or ElasticManager not initialized. Check ES server status and configuration.")
@@ -72,7 +61,6 @@ try:
     )
     if not mysql_manager.connection or not mysql_manager.connection.is_connected():
         logging.critical(f"FATAL: MySQLManager initialized but connection is not active.")
-        # Depending on criticality, you might sys.exit(1) here or let it continue with warnings.
     logging.info("MySQLManager initialized.")
 except Exception as e:
     logging.error(f"Failed to initialize MySQLManager: {e}. MySQL-dependent features will not function.")
@@ -82,22 +70,23 @@ except Exception as e:
 @app.route('/')
 def index():
     """Serves the main dashboard page."""
-    # Flask will look for 'index.html' inside the 'templates' folder.
     return render_template('index.html')
 
 @app.route('/alarm_console_fullscreen')
 def alarm_console_fullscreen():
     """Serves the full-screen alarm console page."""
-    # Flask will look for 'alarm_console_fullscreen.html' inside the 'templates' folder.
-    # You can pass query parameters to the template if needed
     block_id = request.args.get('block_id')
     return render_template('alarm_console_fullscreen.html', block_id=block_id)
 
 @app.route('/ird_overview')
 def ird_overview():
     """Serves the IRD overview dashboard page."""
-    # Flask will look for 'ird_overview.html' inside the 'templates' folder.
     return render_template('ird_overview.html')
+
+@app.route('/switch_overview')
+def switch_overview_page():
+    """Serves the new Switch Overview dashboard page."""
+    return render_template('switch_overview.html')
 
 
 # --- API Endpoints ---
@@ -163,9 +152,7 @@ def get_kmx_block_status():
         return jsonify({"overall_status": "unknown"}), 503
 
     try:
-        # Example: Fetch a document that summarizes KMX status, e.g., by a known ID
-        # Or you might aggregate KMX alarms for a real-time overall status
-        kmx_status_doc = es_manager.get_config("KMX_BLOCK_STATUS") # Assuming a fixed doc ID
+        kmx_status_doc = es_manager.get_config("KMX_BLOCK_STATUS")
         overall_status = kmx_status_doc.get("overall_status", "unknown") if kmx_status_doc else "unknown"
         return jsonify({"overall_status": overall_status}), 200
     except Exception as e:
@@ -177,22 +164,20 @@ def get_kmx_block_status():
 def get_all_active_alarms():
     """
     Fetches all active alarms from the 'active_alarms' Elasticsearch index.
-    This index is expected to be kept up-to-date by the consumers.
     """
     if not es_manager:
         logging.error("Elasticsearch manager not available to fetch all active alarms.")
         return jsonify({"status": "error", "message": "Elasticsearch not configured"}), 503
     
     try:
-        # This now fetches from the 'active_alarms' index, which is kept up-to-date
-        all_alarms = es_manager.fetch_all_alarms() # This method should query 'active_alarms'
+        all_alarms = es_manager.fetch_all_alarms()
         return jsonify({"alarms": all_alarms}), 200
     except Exception as e:
         logging.exception(f"Error fetching all active alarms: {e}")
         return jsonify({"status": "error", "message": f"Error fetching active alarms: {str(e)}"}), 500
 
 
-@app.route('/api/v1/get_alarm_history', methods=['GET', 'POST']) # Allow POST for filters
+@app.route('/api/v1/get_alarm_history', methods=['GET', 'POST'])
 def get_alarm_history():
     """
     Fetches alarm history from the 'monitor_historical_alarms' Elasticsearch index
@@ -202,13 +187,11 @@ def get_alarm_history():
         logging.error("Elasticsearch manager not available to fetch alarm history.")
         return jsonify({"status": "error", "message": "Elasticsearch not configured"}), 503
 
-    # Get filter parameters from request arguments (GET) or JSON body (POST)
     if request.method == 'POST':
         data = request.get_json(silent=True) or {}
     else:
         data = request.args
 
-    # Extract all possible filter parameters
     from_timestamp_str = data.get('from_timestamp')
     to_timestamp_str = data.get('to_timestamp')
     device_name = data.get('device_name')
@@ -217,9 +200,8 @@ def get_alarm_history():
     agent_type = data.get('agent_type')
     severity = data.get('severity')
     message = data.get('message')
-    block_id = data.get('block_id') # This is the key from the frontend
+    block_id = data.get('block_id')
 
-    # Initialize Elasticsearch query structure
     es_query_body = {
         "query": {
             "bool": {
@@ -227,10 +209,9 @@ def get_alarm_history():
             }
         },
         "sort": [{"timestamp": {"order": "desc"}}],
-        "size": 1000 # Adjust size or implement pagination if needed
+        "size": 1000
     }
     
-    # Add time range filter if provided
     if from_timestamp_str or to_timestamp_str:
         range_query = {"range": {"timestamp": {}}}
         if from_timestamp_str:
@@ -239,7 +220,6 @@ def get_alarm_history():
             range_query["range"]["timestamp"]["lte"] = to_timestamp_str
         es_query_body["query"]["bool"]["must"].append(range_query)
     
-    # Add other filters as match queries (case-insensitive where appropriate)
     if device_name:
         es_query_body["query"]["bool"]["must"].append({"match": {"device_name": device_name}})
     if channel_name:
@@ -247,23 +227,20 @@ def get_alarm_history():
     if group_name:
         es_query_body["query"]["bool"]["must"].append({"match": {"group_name": group_name}})
     if agent_type:
-        es_query_body["query"]["bool"]["must"].append({"match": {"type": agent_type}}) # 'type' field in ES document
+        es_query_body["query"]["bool"]["must"].append({"match": {"type": agent_type}})
     if severity:
         es_query_body["query"]["bool"]["must"].append({"match": {"severity": severity}})
     if message:
         es_query_body["query"]["bool"]["must"].append({"match": {"message": message}})
 
-    # Block ID filter logic
     if block_id:
-        # The frontend block_id can be 'C.XXYY' (channel block) or 'G.BLOCKNAME' (global block)
-        # It needs to match either 'frontend_block_id.keyword' or 'group_id.keyword' in Elasticsearch.
         es_query_body["query"]["bool"]["must"].append({
             "bool": {
                 "should": [
-                    {"term": {"frontend_block_id.keyword": block_id.lower()}}, # Use .keyword for exact match
-                    {"term": {"group_id.keyword": block_id.lower()}} # Use .keyword for exact match
+                    {"term": {"frontend_block_id.keyword": block_id.lower()}},
+                    {"term": {"group_id.keyword": block_id.lower()}}
                 ],
-                "minimum_should_match": 1 # At least one of the 'should' clauses must match
+                "minimum_should_match": 1
             }
         })
         logging.info(f"Applying block_id filter: {block_id} to ES query.")
@@ -271,26 +248,113 @@ def get_alarm_history():
     logging.info(f"Executing ES historical alarm query: {json.dumps(es_query_body)}")
 
     try:
-        # Execute the search query directly using the Elasticsearch client instance
         response = es_manager.es.search(index="monitor_historical_alarms", body=es_query_body)
         
-        # Extract hits and total from the Elasticsearch response
         historical_alarms_hits = response.get('hits', {}).get('hits', [])
         total_hits_value = response.get('hits', {}).get('total', {}).get('value', 0)
 
-        # Reformat the response to match the expected 'hits' structure for the frontend
         formatted_alarms = {
             "hits": [
                 {"_source": hit.get('_source')} for hit in historical_alarms_hits
             ],
-            "total": {"value": total_hits_value, "relation": "eq"} # "eq" for exact total
+            "total": {"value": total_hits_value, "relation": "eq"}
         }
         return jsonify(formatted_alarms), 200
     except Exception as e:
         logging.exception(f"Error fetching alarm history: {e}")
         return jsonify({"status": "error", "message": f"Error fetching alarm history: {str(e)}"}), 500
 
+@app.route('/api/v1/get_switch_overview_data', methods=['GET'])
+def get_switch_overview_data():
+    """
+    Fetches switch configurations from MySQL and combines with
+    latest overview data (CPU, Memory, Interfaces) from Elasticsearch.
+    """
+    if not mysql_manager or not es_manager:
+        logging.error("MySQL or Elasticsearch manager not available to fetch switch overview data.")
+        return jsonify({"status": "error", "message": "Backend services not configured"}), 503
+
+    combined_switch_data = []
+
+    try:
+        # 1. Fetch switch configurations from MySQL
+        # Assuming mysql_manager has a method to execute raw queries or get switch configs.
+        # This is a placeholder for a proper method in MySQLManager.
+        cursor = mysql_manager.connection.cursor(dictionary=True)
+        cursor.execute("SELECT switch_ip, hostname, model FROM switch_configs")
+        switch_configs = cursor.fetchall()
+        cursor.close()
+        logging.info(f"Fetched {len(switch_configs)} switch configurations from MySQL.")
+
+        # 2. For each switch, fetch latest data from Elasticsearch
+        for config in switch_configs:
+            switch_ip = config.get('switch_ip')
+            hostname = config.get('hostname')
+            model = config.get('model')
+
+            if not switch_ip or not hostname:
+                logging.warning(f"Skipping switch config due to missing IP or hostname: {config}")
+                continue
+
+            es_query_body = {
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"switch_ip.keyword": switch_ip}},
+                            {"term": {"hostname.keyword": hostname}}
+                        ]
+                    }
+                },
+                "sort": [{"timestamp": {"order": "desc"}}],
+                "size": 1 # Get only the latest document
+            }
+
+            es_data = {}
+            try:
+                # Assuming ElasticManager's es client can be used directly for search
+                es_response = es_manager.es.search(index="historical_alarms", body=es_query_body)
+                if es_response and es_response['hits']['hits']:
+                    latest_doc = es_response['hits']['hits'][0]['_source']
+                    es_data = {
+                        "cpu_utilization": latest_doc.get("cpu_utilization"),
+                        "memory_utilization": latest_doc.get("memory_utilization"),
+                        "interfaces": latest_doc.get("interfaces", [])
+                    }
+                    logging.info(f"Fetched ES data for {switch_ip} - {hostname}.")
+                else:
+                    logging.info(f"No ES data found for {switch_ip} - {hostname} in switch_overview.")
+            except Exception as es_e:
+                logging.error(f"Error fetching ES data for {switch_ip} - {hostname}: {es_e}")
+                es_data = {} # Ensure empty data if ES fetch fails
+
+            # 3. Combine MySQL and Elasticsearch data
+            combined_switch = {
+                "switch_ip": switch_ip,
+                "hostname": hostname,
+                "model": model,
+                "cpu_utilization": es_data.get("cpu_utilization", "N/A"),
+                "memory_utilization": es_data.get("memory_utilization", "N/A"),
+                "interfaces": es_data.get("interfaces", [])
+            }
+
+            # Determine overall interface status and collect problematic interfaces
+            interface_problem = False
+            problem_interfaces = []
+            for iface in combined_switch["interfaces"]:
+                if iface.get("admin_status") == "up" and iface.get("oper_status") == "down":
+                    interface_problem = True
+                    problem_interfaces.append(iface.get("name", "Unknown Interface"))
+            
+            combined_switch["overall_interface_status"] = "Problem" if interface_problem else "OK"
+            combined_switch["problem_interfaces"] = problem_interfaces
+
+            combined_switch_data.append(combined_switch)
+
+        return jsonify(combined_switch_data), 200
+
+    except Exception as e:
+        logging.exception(f"Error in get_switch_overview_data: {e}")
+        return jsonify({"status": "error", "message": f"Error fetching switch overview data: {str(e)}"}), 500
+
 if __name__ == '__main__':
-    # Flask will now automatically look for 'templates/' and 'static/' relative to main.py
-    # Ensure your project structure matches this expectation.
     app.run(debug=True, host='0.0.0.0', port=5000)
