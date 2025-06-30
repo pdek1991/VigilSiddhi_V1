@@ -1,4 +1,4 @@
-# VigilSiddhi_V1
+# VigilSiddhi
 
 **VigilSiddhi** is an extensible, multi-agent, real-time monitoring and alarm management system for broadcast, network, and IT infrastructure. It supports modern architectures with SNMP, Windows, iLO, IRD, Switch, and custom health checks, providing unified dashboards, alarm consoles, and history analytics. The backend is powered by Python (Flask), Elasticsearch, MySQL, Redis Streams, WebSockets, and push notifications.
 
