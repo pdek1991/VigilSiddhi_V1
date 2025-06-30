@@ -256,16 +256,6 @@ Additional tables as needed for device metadata, historical configs, or agent as
 
 ---
 
-## License
-
-MIT License. See `LICENSE` file for details.
-
----
-
 ## Contact
 
 For queries, enhancements, or support, please open an issue or contact the maintainer: [pdek1991](https://github.com/pdek1991)
-
----
-```
-*This README gives a complete, professional overview for developers, operators, and contributors. Sections and schemas can be extended as your repo evolves.*
