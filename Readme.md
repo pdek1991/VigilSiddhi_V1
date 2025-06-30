@@ -1,6 +1,6 @@
 # VigilSiddhi_V1
 
-VigilSiddhi is an extensible, multi-agent, real-time monitoring and alarm management system for broadcast and IT infrastructure. It integrates SNMP, Windows, iLO, IRD, Switch, and custom health checks, providing unified dashboards, alarm consoles, and history analytics. The backend is built on Python (Flask), Elasticsearch, MySQL, Redis Streams, WebSockets, and push notifications.
+**VigilSiddhi** is an extensible, multi-agent, real-time monitoring and alarm management system for broadcast, network, and IT infrastructure. It supports modern architectures with SNMP, Windows, iLO, IRD, Switch, and custom health checks, providing unified dashboards, alarm consoles, and history analytics. The backend is powered by Python (Flask), Elasticsearch, MySQL, Redis Streams, WebSockets, and push notifications.
 
 ---
 
@@ -10,6 +10,7 @@ VigilSiddhi is an extensible, multi-agent, real-time monitoring and alarm manage
 - [Key Features](#key-features)
 - [How It Works](#how-it-works)
 - [Architecture](#architecture)
+- [NMS, IT, and OT Environments](#nms-it-and-ot-environments)
 - [Pros & Benefits](#pros--benefits)
 - [API Endpoints](#api-endpoints)
 - [Elasticsearch Indexes & Schema](#elasticsearch-indexes--schema)
@@ -24,12 +25,12 @@ VigilSiddhi is an extensible, multi-agent, real-time monitoring and alarm manage
 
 ## Overview
 
-**VigilSiddhi** is designed for 24x7 operational monitoring of devices such as IRDs, switches, servers (Windows/Linux), HP iLOs, and networked appliances. It provides:
+VigilSiddhi is designed for 24x7 operational monitoring of devices such as IRDs, switches, servers (Windows/Linux), HP iLOs, and networked appliances. It provides:
 
 - Real-time health dashboards
 - Configurable alarm rules and deduplication
 - Alarm history and forensic analytics
-- Seamless integration with NMS/IT/OT environments
+- Seamless integration with NMS, IT, and OT environments
 
 ---
 
@@ -37,9 +38,9 @@ VigilSiddhi is an extensible, multi-agent, real-time monitoring and alarm manage
 
 - **Multi-Agent Monitoring:** SNMP polling, SNMP traps, Windows/Linux process checks, website/API health, iLO monitoring, IRD, switch monitoring, and more.
 - **Real-Time Alarm Console:** Operator-friendly alarm board with live updates.
-- **WebSocket Live Updates:** Instant push of alarm/status to connected dashboards via WebSocket for sub-second visibility.
-- **Event-Based Notifications:** Telegram and Email alerts for each event (raise/clear); notification rules are configurable.
-- **Flexible Data Storage:** Uses Elasticsearch for state/config/history, MySQL for structured config, Redis Streams for event flow.
+- **WebSocket Live Updates:** Instant push of alarm/status to dashboards via WebSocket.
+- **Event-Based Notifications:** Telegram and Email alerts for each event (raise/clear).
+- **Flexible Data Storage:** Elasticsearch for state/config/history, MySQL for structured config, Redis Streams for event flow.
 - **Config-Driven:** Add/change monitored devices/channels via JSON/YAML or DB.
 - **Historical Analytics:** Search, filter, and export alarm/event history.
 - **REST API:** Integration with external systems and custom dashboards.
@@ -80,6 +81,19 @@ VigilSiddhi is an extensible, multi-agent, real-time monitoring and alarm manage
                              |                    |   +---------------------+
                              +--------------------+
 ```
+
+---
+
+## NMS, IT, and OT Environments
+
+- **NMS (Network Management System):**  
+  A platform for monitoring, managing, and controlling network devices (switches, routers, servers, etc.). NMS helps with fault management, performance monitoring, and configuration.
+- **IT (Information Technology):**  
+  All traditional computing, networking, and storage systems—servers, desktops, network equipment, and associated software.
+- **OT (Operational Technology):**  
+  Systems and equipment that monitor or control physical devices, processes, and events in industries (e.g., broadcast, manufacturing, utilities). Includes industrial control systems, SCADA, PLCs, and other real-world device management.
+
+**VigilSiddhi** unifies monitoring and alarm management across all these environments.
 
 ---
 
@@ -185,42 +199,35 @@ VigilSiddhi is an extensible, multi-agent, real-time monitoring and alarm manage
 - `switch_configs`: Switch IP, hostname, model, etc.
 
 **Roles:**  
-- Primary source of truth for device/channel metadata.
+- Source of truth for device/channel metadata.
 - Used for API dropdowns, config reloads, and agent assignment.
 
 ---
 
 ## Redis Streams & Groups
 
-### Stream Names (from `REDIS_STREAM_config.md` and code):
+### Stream Names
 
-- **Agent Streams:**  
-  - `vs:agent:cisco_sw_status`
-  - `vs:agent:enc_ilo_status`, `vs:agent:enc_iloM_status`, `vs:agent:enc_iloP_status`, `vs:agent:enc_iloB_status`
-  - `vs:agent:iloM_status`, `vs:agent:iloP_status`, `vs:agent:iloB_status`
-  - `vs:agent:playoutmv_status`
-  - `vs:agent:windows_status`
-  - `vs:agent:ird_config_status`, `vs:agent:ird_trend_status`
-  - `vs:agent:zixi_status`
-  - `vs:agent:nexus_sw_status`
-  - `vs:agent:gv_da_status`
-  - `vs:agent:pgm_router_status`
-  - `vs:agent:kmx_status`
-- **Group Names:**  
-  - `<agent_stream>:group:<role>` (e.g., `vs:agent:kmx_status:group:kmx_processor`)
-  - `websocket_broadcaster` and `es_ingester` are always present for notifying frontends and persisting to ES.
+A selection of agent-specific streams (see `REDIS_STREAM_config.md` and code):
 
-### Consumer Group Logic
+- `vs:agent:cisco_sw_status`
+- `vs:agent:enc_ilo_status`, `vs:agent:enc_iloM_status`, `vs:agent:enc_iloP_status`, `vs:agent:enc_iloB_status`
+- `vs:agent:iloM_status`, `vs:agent:iloP_status`, `vs:agent:iloB_status`
+- `vs:agent:playoutmv_status`
+- `vs:agent:windows_status`
+- `vs:agent:ird_config_status`, `vs:agent:ird_trend_status`
+- `vs:agent:zixi_status`
+- `vs:agent:nexus_sw_status`
+- `vs:agent:gv_da_status`
+- `vs:agent:pgm_router_status`
+- `vs:agent:kmx_status`
 
-- **Agent-specific processor groups:**  
-  Each agent stream can be consumed by a dedicated processor group for custom logic.
-- **Central Consumers:**  
-  - `websocket_broadcaster`: For pushing to all dashboards via WebSocket.
-  - `es_ingester`: For saving events/state to Elasticsearch.
-- **State Hashes:**  
-  - e.g., `ilo_alarm_states_per_device`, `kmx_alarm_states_per_device` — for hot state and deduplication, storing only current non-OK alarms.
+#### Consumer Groups
 
-### Example (from code):
+- `<agent_stream>:group:<role>` (e.g., `vs:agent:kmx_status:group:kmx_processor`)
+- `websocket_broadcaster` and `es_ingester` for notifying frontends and persisting to ES
+
+#### Example
 
 ```python
 # Example publishing to a Redis stream
@@ -236,11 +243,10 @@ r.xgroup_create("vs:agent:kmx_status", "websocket_broadcaster", id='$', mkstream
 ## Real-Time & Notifications
 
 - **WebSocket:**  
-  - All status and alarm updates are pushed to `/ws/alarms` endpoint for UIs.
-  - Backend processors trigger WebSocket notifications to all connected clients.
+  All status and alarm updates are pushed to `/ws/alarms` endpoint for UIs.
 - **Telegram & Email:**  
-  - Each event can trigger Telegram messages (to groups/users) and emails (to operators/teams).
-  - Notification handlers are called on each event, with rules configurable per agent, block, or severity.
+  Each event can trigger Telegram messages (to groups/users) and emails (to operators/teams).
+  Notification handlers are called on each event, with rules configurable per agent, block, or severity.
 
 ---
 
@@ -260,6 +266,12 @@ r.xgroup_create("vs:agent:kmx_status", "websocket_broadcaster", id='$', mkstream
   Responsive dashboard for mobile.
 - **Config Editor & Audit Logs:**  
   In-app config management and operator audit trails.
+- **PWA Integration for Live Push Notifications:**  
+  Implement Progressive Web App (PWA) capabilities so users can install the dashboard on any device and receive real-time push notifications even when the app is closed. This includes:
+  - Service Workers for background sync and push
+  - Integration with browser/device notification APIs
+  - Installation prompt for mobile/desktop
+  - Offline support and improved mobile UX
 
 ---
 
@@ -271,11 +283,6 @@ r.xgroup_create("vs:agent:kmx_status", "websocket_broadcaster", id='$', mkstream
 
 ---
 
-## License
-
-MIT License. See `LICENSE` file for details.
-
----
 
 ## Contact
 
@@ -283,6 +290,4 @@ For queries, enhancements, or support, please open an issue or contact the maint
 
 ---
 
-*For more details, agent logic, or notifications, see the codebase: [VigilSiddhi_V1 on GitHub](https://github.com/pdek1991/VigilSiddhi_V1)*
-```
-**This README now fully documents Redis Streams, ES schema, MySQL, and real-time logic as per your files and code.**
+**For more, see the full codebase:** [VigilSiddhi_V1 on GitHub](https://github.com/pdek1991/VigilSiddhi_V1)
