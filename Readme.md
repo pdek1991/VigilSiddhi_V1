@@ -262,7 +262,7 @@ r.xgroup_create("vs:agent:kmx_status", "websocket_broadcaster", id='$', mkstream
   Automated actions on alarms.
 - **Integrations:**  
   Additional notification channels (SMS, Slack, Teams), advanced rules.
-- **Advanced Analytics:*
+- **Advanced Analytics:**
   Root-cause analysis, anomaly detection, and    predictive maintenance.
 - **Mobile UI:**  
   Responsive dashboard for mobile.
