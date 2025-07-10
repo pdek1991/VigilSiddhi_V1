@@ -1,266 +1,217 @@
-# switch_config_consumer.py
-
 import redis
 import json
+import time
 import logging
 import os
 from elasticsearch import AsyncElasticsearch
-from elasticsearch.exceptions import ConnectionError as EsConnectionError
+from datetime import datetime
 import asyncio
 import aiohttp
 import uuid
-from typing import Dict, List, Any
+from elasticsearch.helpers import async_bulk
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- Configuration ---
 REDIS_HOST = os.environ.get('REDIS_HOST', '192.168.56.30')
 REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
-REDIS_STREAM_NAME = "vs:agent:switch_status"
-REDIS_GROUP_NAME = "vs:group:switch_processor"
-CONSUMER_NAME = f"switch_consumer_{uuid.uuid4().hex[:6]}"
 
 ES_HOST = os.environ.get('ES_HOST', '192.168.56.30')
 ES_PORT = int(os.environ.get('ES_PORT', 9200))
 
 WEBSOCKET_NOTIFIER_URL = os.environ.get('WEBSOCKET_NOTIFIER_URL', 'http://127.0.0.1:8001/notify')
 
-# --- Elasticsearch Index Definitions ---
-HISTORICAL_ALARMS_INDEX = "monitor_historical_alarms"
-SWITCH_OVERVIEW_INDEX = "switch_overview"
+REDIS_STREAM_NAME = "vs:agent:switch_status"
+CONSUMER_GROUP_NAME = "es_ingester_switch"
+CONSUMER_NAME = "switch_config_consumer_instance_1"
 
-ES_INDEX_SCHEMAS = {
-    HISTORICAL_ALARMS_INDEX: {
-        "mappings": {
-            "properties": {
-                "timestamp": {"type": "date"},
-                "device_ip": {"type": "keyword"},
-                "device_name": {"type": "keyword"},
-                "alarm_type": {"type": "keyword"},
-                "severity": {"type": "keyword"},
-                "message": {"type": "text", "fields": {"keyword": {"type": "keyword", "ignore_above": 2048}}},
-                "identifier": {"type": "keyword"},
-                "status": {"type": "keyword"} # 'new', 'cleared'
-            }
-        }
-    },
-    SWITCH_OVERVIEW_INDEX: {
-        "mappings": {
-            "properties": {
-                "timestamp": {"type": "date"},
-                "switch_ip": {"type": "keyword"},
-                "hostname": {"type": "keyword"},
-                "uptime": {"type": "keyword"},
-                "model": {"type": "keyword"},
-                "cpu_utilization": {"type": "keyword"}, # Stored as string like "5%"
-                "memory_utilization": {"type": "keyword"}, # Stored as string like "50.23%"
-                "fans": {"type": "nested"},
-                "power_supplies": {"type": "nested"},
-                "temperature_sensors": {"type": "nested"},
-                "interfaces": {
-                    "type": "nested",
-                    "properties": {
-                        "index": {"type": "keyword"}, # Added index as keyword
-                        "name": {"type": "keyword"},
-                        "alias": {"type": "text"},
-                        "admin_status": {"type": "keyword"},
-                        "oper_status": {"type": "keyword"},
-                        "in_octets": {"type": "long"},
-                        "out_octets": {"type": "long"},
-                        "in_kbps": {"type": "float"},
-                        "out_kbps": {"type": "float"},
-                    }
-                }
-            }
-        }
-    }
-}
+# Redis Hash name for storing switch block states (full state per unique device)
+SWITCH_STATUS_STATES_PER_DEVICE_KEY = "switch_status_states_per_device"
 
-# --- Global Clients ---
-r: redis.Redis = None
-es: AsyncElasticsearch = None
-http_session: aiohttp.ClientSession = None
-last_active_alarms_redis_key = "switch_last_active_alarms"
+# Initialize Redis client
+r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=False)
 
-async def initialize_clients():
-    """Initializes and connects all required clients."""
-    global r, es, http_session
-    # Redis
-    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, decode_responses=True)
-    await asyncio.get_event_loop().run_in_executor(None, r.ping)
-    logging.info("Consumer: Successfully connected to Redis.")
-    
-    # Elasticsearch
-    es = AsyncElasticsearch([{'host': ES_HOST, 'port': ES_PORT, 'scheme': 'http'}])
-    await es.info() # Test connection
-    logging.info(f"Consumer: Successfully connected to Elasticsearch.")
-    
-    # aiohttp
-    http_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False))
-    logging.info("Consumer: aiohttp ClientSession initialized.")
+# Initialize Elasticsearch client - Now using AsyncElasticsearch
+es = AsyncElasticsearch(f"http://{ES_HOST}:{ES_PORT}")
 
-async def setup_es_and_redis():
-    """Creates ES indices and Redis consumer group if they don't exist."""
-    # ES Indices
-    for index, schema in ES_INDEX_SCHEMAS.items():
-        if not await es.indices.exists(index=index):
-            await es.indices.create(index=index, body=schema)
-            logging.info(f"Elasticsearch index '{index}' created.")
-        else:
-            logging.info(f"Elasticsearch index '{index}' already exists.")
-    
-    # Redis Group
+# Async HTTP session for WebSocket notifier communication
+http_session = None
+
+async def send_websocket_notification(message_data):
+    """Sends a JSON message to the WebSocket notifier's HTTP endpoint."""
+    global http_session
+    if http_session is None or http_session.closed:
+        http_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False))
+
     try:
-        r.xgroup_create(REDIS_STREAM_NAME, REDIS_GROUP_NAME, id='0', mkstream=True)
-        logging.info(f"Redis group '{REDIS_GROUP_NAME}' created for stream '{REDIS_STREAM_NAME}'.")
-    except redis.exceptions.ResponseError as e:
-        if "BUSYGROUP" in str(e):
-            logging.info(f"Redis group '{REDIS_GROUP_NAME}' already exists.")
-        else:
-            raise
-
-async def send_websocket_notification(payload: Dict):
-    """Sends a notification to the WebSocket server."""
-    try:
-        async with http_session.post(WEBSOCKET_NOTIFIER_URL, json=payload) as response:
+        async with http_session.post(WEBSOCKET_NOTIFIER_URL, json=message_data) as response:
             if response.status != 200:
                 logging.error(f"Failed to send WebSocket notification: {response.status} - {await response.text()}")
             else:
-                logging.info(f"WebSocket notification sent for {payload.get('device_ip')}: {payload.get('alarm_type')}")
+                logging.info(f"WebSocket notification sent successfully for {message_data.get('hostname')}.")
+    except aiohttp.ClientConnectionError as e:
+        logging.error(f"WebSocket notifier connection error: {e}. Is the notifier running?")
     except Exception as e:
         logging.error(f"Error sending WebSocket notification: {e}", exc_info=True)
 
-async def process_alarms(payload: Dict):
-    """Compares current vs previous alarms, sends notifications, and logs to ES."""
-    device_ip = payload['device_ip']
-    current_alarms = {a['identifier']: a for a in payload.get('active_alarms', [])}
-    
-    # Get previous alarms from Redis
-    prev_alarms_json = r.hget(last_active_alarms_redis_key, device_ip)
-    prev_alarms = json.loads(prev_alarms_json) if prev_alarms_json else {}
-
-    # Find new alarms
-    for identifier, alarm in current_alarms.items():
-        if identifier not in prev_alarms:
-            logging.info(f"NEW ALARM for {device_ip}: {alarm['message']}")
-            alarm_doc = {**alarm, "timestamp": payload['timestamp'], "device_ip": device_ip, "device_name": payload['device_name'], "status": "new"}
-            await es.index(index=HISTORICAL_ALARMS_INDEX, document=alarm_doc)
-            await send_websocket_notification({**alarm, "device_ip": device_ip, "device_name": payload['device_name'], "frontend_id": payload['frontend_id']})
-
-    # Find cleared alarms
-    for identifier, alarm in prev_alarms.items():
-        if identifier not in current_alarms:
-            logging.info(f"CLEARED ALARM for {device_ip}: {alarm['message']}")
-            cleared_alarm_doc = {**alarm, "timestamp": payload['timestamp'], "device_ip": device_ip, "device_name": payload['device_name'], "status": "cleared", "severity": "INFO"}
-            await es.index(index=HISTORICAL_ALARMS_INDEX, document=cleared_alarm_doc)
-            await send_websocket_notification({**cleared_alarm_doc, "frontend_id": payload['frontend_id']})
-
-    # Update Redis with current alarms
-    if current_alarms:
-        r.hset(last_active_alarms_redis_key, device_ip, json.dumps(current_alarms))
-    else:
-        r.hdel(last_active_alarms_redis_key, device_ip)
-
-async def index_overview_data(payload: Dict):
-    """Indexes the comprehensive switch overview data to Elasticsearch."""
-    details = payload['details']
-    
-    # Prepare interfaces data for Elasticsearch, ensuring proper types
-    interfaces_for_es = []
-    for iface in details.get('interfaces', []):
-        interfaces_for_es.append({
-            "index": iface.get('index'),
-            "name": iface.get('name'),
-            "alias": iface.get('alias'),
-            "admin_status": iface.get('admin_status'),
-            "oper_status": iface.get('oper_status'),
-            "in_octets": int(iface.get('in_octets', 0)),
-            "out_octets": int(iface.get('out_octets', 0)),
-            "in_kbps": float(iface.get('in_kbps', 0.0)),
-            "out_kbps": float(iface.get('out_kbps', 0.0)),
-        })
-
-    overview_doc = {
-        "timestamp": payload['timestamp'],
-        "switch_ip": payload['device_ip'],
-        "hostname": details.get('system_info', {}).get('hostname'),
-        "uptime": details.get('system_info', {}).get('uptime'),
-        "model": payload.get('model'), # Model comes from the top-level payload
-        "cpu_utilization": details.get('hardware_health', {}).get('cpu_utilization'),
-        "memory_utilization": details.get('hardware_health', {}).get('memory_utilization'),
-        "fans": details.get('hardware_health', {}).get('fans', []),
-        "power_supplies": details.get('hardware_health', {}).get('power_supplies', []),
-        "temperature_sensors": details.get('hardware_health', {}).get('temperature_sensors', []),
-        "interfaces": interfaces_for_es
-    }
-    
-    # Use a unique ID for Elasticsearch document to prevent duplicates on re-indexing
-    doc_id = f"{payload['device_ip']}_{payload['timestamp']}"
-    await es.index(index=SWITCH_OVERVIEW_INDEX, document=overview_doc, id=doc_id)
-    logging.info(f"Indexed overview data for {payload['device_ip']} to '{SWITCH_OVERVIEW_INDEX}'.")
-
-async def process_message(message_data: str):
-    """Main processing function for a single message from Redis."""
+def setup_consumer_group():
+    """Ensures the consumer group exists for the stream."""
     try:
-        payload = json.loads(message_data)
-        logging.info(f"Processing message for device {payload.get('device_ip')}")
-
-        # Task 1: Process alarms (new/cleared), notify, and log
-        await process_alarms(payload)
-        
-        # Task 2: Index the full overview data
-        await index_overview_data(payload)
-
-    except json.JSONDecodeError as e:
-        logging.error(f"Failed to decode JSON message: {e}")
+        r.xgroup_create(REDIS_STREAM_NAME, CONSUMER_GROUP_NAME, id='$', mkstream=True)
+        logging.info(f"Created consumer group '{CONSUMER_GROUP_NAME}' for stream '{REDIS_STREAM_NAME}'")
+    except redis.exceptions.ResponseError as e:
+        if "BUSYGROUP" in str(e):
+            logging.info(f"Consumer group '{CONSUMER_GROUP_NAME}' already exists for stream '{REDIS_STREAM_NAME}'.")
+        else:
+            logging.error(f"Error creating consumer group: {e}")
     except Exception as e:
-        logging.error(f"Error processing message for {payload.get('device_ip', 'unknown')}: {e}", exc_info=True)
+        logging.error(f"Unhandled error during consumer group setup: {e}", exc_info=True)
 
-async def consume_loop():
-    """Continuously consumes messages from the Redis stream."""
-    logging.info(f"Consumer '{CONSUMER_NAME}' starting to listen to stream '{REDIS_STREAM_NAME}'...")
+async def process_message(message_id, payload):
+    """Processes a single message from the Redis stream, indexes to ES, and sends WS notifications."""
+    logging.info(f"Processing message ID: {message_id.decode()}")
+    
+    # Extract relevant data from payload
+    timestamp = payload.get('timestamp')
+    agent_type = payload.get('agent_type')
+    switch_ip = payload.get('switch_ip')
+    hostname = payload.get('hostname')
+    model = payload.get('model')
+    cpu_utilization = payload.get('cpu_utilization')
+    memory_utilization = payload.get('memory_utilization')
+    uptime = payload.get('uptime')
+    interfaces = payload.get('interfaces', [])
+    overall_interface_status = payload.get('overall_interface_status')
+    problem_interfaces = payload.get('problem_interfaces', [])
+
+    # --- State Management for Frontend Notifications ---
+    device_state_field = f"{hostname}_{switch_ip}" 
+
+    last_state_json = r.hget(SWITCH_STATUS_STATES_PER_DEVICE_KEY, device_state_field)
+    last_state = json.loads(last_state_json.decode('utf-8')) if last_state_json else None
+
+    send_ws_notification = False
+    ws_message_type = "UPDATE" # Default type
+
+    # Check if status has changed or if there are new problem interfaces
+    if not last_state or \
+       last_state.get('overall_interface_status') != overall_interface_status or \
+       set(last_state.get('problem_interfaces', [])) != set(problem_interfaces):
+        
+        send_ws_notification = True
+        if not last_state:
+            ws_message_type = "INITIAL_LOAD"
+        elif overall_interface_status == "OK" and last_state.get('overall_interface_status') == "Problem":
+            ws_message_type = "STATUS_CLEARED"
+            logging.info(f"Switch {hostname} ({switch_ip}) status CLEARED. Sending WS notification.")
+        elif overall_interface_status == "Problem" and last_state.get('overall_interface_status') == "OK":
+            ws_message_type = "NEW_PROBLEM"
+            logging.info(f"Switch {hostname} ({switch_ip}) has NEW PROBLEM. Sending WS notification.")
+        else:
+            ws_message_type = "STATUS_UPDATE"
+            logging.info(f"Switch {hostname} ({switch_ip}) status UPDATED. Sending WS notification.")
+
+        # Update state in Redis
+        r.hset(SWITCH_STATUS_STATES_PER_DEVICE_KEY, device_state_field, json.dumps(payload))
+    else:
+        logging.debug(f"Switch {hostname} ({switch_ip}) status unchanged. Skipping WS notification.")
+
+    # --- WebSocket Notification ---
+    if send_ws_notification:
+        websocket_message = {
+            "timestamp": timestamp,
+            "hostname": hostname,
+            "switch_ip": switch_ip,
+            "cpu_utilization": cpu_utilization,
+            "memory_utilization": memory_utilization,
+            "uptime": uptime,
+            "overall_interface_status": overall_interface_status,
+            "problem_interfaces": problem_interfaces,
+            "type": ws_message_type # Indicate the type of update
+        }
+        await send_websocket_notification(websocket_message)
+
+    # --- Index to Elasticsearch ---
+    # Create a document for the overall switch status
+    overall_switch_doc = {
+        "_id": f"switch_status_{hostname}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}", # Unique ID for each poll
+        "_index": "monitor_switch_status",
+        "timestamp": timestamp,
+        "agent_type": agent_type,
+        "switch_ip": switch_ip,
+        "hostname": hostname,
+        "model": model,
+        "cpu_utilization": cpu_utilization,
+        "memory_utilization": memory_utilization,
+        "uptime": uptime,
+        "overall_interface_status": overall_interface_status,
+        "problem_interfaces": problem_interfaces,
+        # Store detailed interfaces as a nested object/array in ES if needed for historical analysis
+        "interfaces_details": interfaces 
+    }
+
+    try:
+        await es.index(index="monitor_switch_status", document=overall_switch_doc)
+        logging.info(f"Indexed overall switch status for {hostname} to Elasticsearch.")
+    except Exception as e:
+        logging.error(f"Failed to index overall switch status for {hostname} to Elasticsearch: {e}", exc_info=True)
+
+
+async def consume_messages():
+    """Main function to consume messages from Redis Stream."""
+    logging.info(f"Starting Redis consumer for stream '{REDIS_STREAM_NAME}' with group '{CONSUMER_GROUP_NAME}'.")
     while True:
         try:
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: r.xreadgroup(
-                    groupname=REDIS_GROUP_NAME,
-                    consumername=CONSUMER_NAME,
-                    streams={REDIS_STREAM_NAME: '>'},
-                    count=10,
-                    block=5000
-                )
+            messages = r.xreadgroup(
+                CONSUMER_GROUP_NAME,
+                CONSUMER_NAME,
+                {REDIS_STREAM_NAME: '>'},
+                count=10,
+                block=5000
             )
-            if not response:
-                continue
 
-            for stream, messages in response:
-                for msg_id, data in messages:
-                    await process_message(data['data'])
-                    r.xack(REDIS_STREAM_NAME, REDIS_GROUP_NAME, msg_id)
+            if messages:
+                processing_tasks = []
+                for stream, message_list in messages:
+                    for message_id, message_data in message_list:
+                        try:
+                            payload = json.loads(message_data[b'data'].decode('utf-8'))
+                            processing_tasks.append(process_message(message_id, payload))
+                        except json.JSONDecodeError as jde:
+                            logging.error(f"JSON Decode Error for message {message_id.decode()} in {stream.decode()}: {jde}")
+                            r.xack(stream, CONSUMER_GROUP_NAME, message_id)
+                        except Exception as e:
+                            logging.error(f"Error preparing message {message_id.decode()} for processing: {e}", exc_info=True)
+                            r.xack(stream, CONSUMER_GROUP_NAME, message_id)
+
+                await asyncio.gather(*processing_tasks)
+
+                for stream, message_list in messages:
+                    for message_id, message_data in message_list:
+                         r.xack(stream, CONSUMER_GROUP_NAME, message_id)
+                         logging.debug(f"Acknowledged message: {message_id}")
+            else:
+                logging.debug("No new messages from Redis stream.")
 
         except redis.exceptions.ConnectionError as e:
-            logging.error(f"Redis connection error: {e}. Retrying...")
-            await asyncio.sleep(5)
+            logging.error(f"Redis connection error: {e}. Retrying in 5 seconds...")
+            time.sleep(5)
         except Exception as e:
-            logging.error(f"Unhandled error in consumer loop: {e}", exc_info=True)
-            await asyncio.sleep(1)
+            logging.error(f"Unhandled error in Redis stream listener: {e}", exc_info=True)
+            time.sleep(1)
 
-async def main():
-    """Main entry point for the consumer application."""
-    try:
-        await initialize_clients()
-        await setup_es_and_redis()
-        await consume_loop()
-    except Exception as e:
-        logging.critical(f"Consumer application failed to start: {e}", exc_info=True)
-    finally:
-        if es: await es.close()
-        if http_session: await http_session.close()
-        logging.info("Consumer clients closed.")
+async def main_async():
+    """Main asynchronous entry point."""
+    setup_consumer_group()
+    await consume_messages()
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.run(main_async())
     except KeyboardInterrupt:
-        logging.info("Consumer stopped by user.")
+        logging.info("Switch Consumer stopped by user.")
+    finally:
+        if http_session:
+            asyncio.run(http_session.close())
+        if es:
+           asyncio.run(es.close())

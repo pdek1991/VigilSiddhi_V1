@@ -1,426 +1,218 @@
-# switch_api_client.py
-
 import logging
-import time # Import time for bitrate calculation timestamp (primary import)
-from pysnmp.hlapi.v1arch.asyncio import (
-    get_cmd,
-    next_cmd,
-    CommunityData,
-    UdpTransportTarget,
-    SnmpDispatcher,
-)
-from pysnmp.proto import rfc1902 # For Null object check
-from pysnmp.proto.rfc1902 import ObjectIdentifier # Import ObjectIdentifier directly
-from pysnmp.error import PySnmpError # To specifically catch SNMP errors
-from pysnmp.smi import builder, view # Import builder and view for MIB management
 import asyncio
-from datetime import timedelta
+import os
+import redis
+import json
+import aiohttp # For making HTTP requests to Prometheus
 
-
-# The logging configuration is expected to be handled by the main application.
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class SwitchAPIClient:
     """
-    A client for interacting with switches via SNMP.
-    Fetches hardware health, interface status, and system information.
-    This version is updated to be resilient to SNMP timeouts and avoids MIB lookups.
+    A client for interacting with network switches by fetching metrics from Prometheus.
     """
     
-    # --- System MIBs ---
-    SYS_UPTIME_OID = "1.3.6.1.2.1.1.3.0"
-    SYS_HOSTNAME_OID = "1.3.6.1.2.1.1.5.0"
+    PROMETHEUS_URL = os.environ.get('PROMETHEUS_URL', 'http://192.168.56.30:9090')
 
-    # --- Interface MIBs (IF-MIB) ---
-    IF_DESCR_OID = "1.3.6.1.2.1.2.2.1.2"
-    IF_ADMIN_STATUS_OID = "1.3.6.1.2.1.2.2.1.7"
-    IF_OPER_STATUS_OID = "1.3.6.1.2.1.2.2.1.8"
-    IF_IN_OCTETS_OID = "1.3.6.1.2.1.2.2.1.10"
-    IF_OUT_OCTETS_OID = "1.3.6.1.2.1.2.2.1.16"
-    IF_ALIAS_OID = "1.3.6.1.2.1.31.1.1.1.18"
+    # Redis configuration for caching (optional, but good for performance)
+    REDIS_HOST = os.environ.get('REDIS_HOST', '192.168.56.30')
+    REDIS_PORT = int(os.environ.get('REDIS_PORT', 6379))
+    CACHE_TTL_SECONDS = 30 # Cache results for 30 seconds, aligning with agent poll interval
 
-    # --- Cisco Specific MIBs ---
-    CISCO_CPU_5MIN_OID = "1.3.6.1.4.1.9.2.1.58.0"
-    CISCO_MEM_POOL_USED_OID = "1.3.6.1.4.1.9.9.48.1.1.1.5"
-    CISCO_MEM_POOL_FREE_OID = "1.3.6.1.4.1.9.9.48.1.1.1.6"
-    
-    # --- Environment Monitoring MIBs (CISCO-ENVMON-MIB) ---
-    CISCO_ENV_MON_FAN_STATUS_OID = "1.3.6.1.4.1.9.9.13.1.4.1.3"
-    CISCO_ENV_MON_TEMP_VALUE_OID = "1.3.6.1.4.1.9.9.13.1.3.1.3"
-    CISCO_ENV_MON_POWER_STATUS_OID = "1.3.6.1.4.1.9.9.13.1.5.1.3"
-    
-    # --- Entity MIB for sensor descriptions ---
-    ENTITY_PHYSICAL_NAME_OID = "1.3.6.1.2.1.47.1.1.1.1.7"
-
-    # OID for EndOfMibView, used for robust walk termination check
-    END_OF_MIB_VIEW_OID = "1.3.6.1.6.3.1.1.5.0"
-
-
-    def __init__(self, timeout=15, retries=2): # Increased default timeout to 15 seconds and retries to 2
-        self.snmp_dispatcher = SnmpDispatcher()
-        self.timeout = timeout
-        self.retries = retries
-        logging.info(f"SwitchAPIClient initialized with SnmpDispatcher (timeout={timeout}s, retries={retries}).")
-        
-        # Create an empty MibBuilder. By default, it has no MIB sources.
-        mibBuilder = builder.MibBuilder()
-        # Create a MibViewController using this empty MibBuilder.
-        # Assign it to the dispatcher to ensure no MIB lookups are performed.
-        self.snmp_dispatcher.mibViewController = view.MibViewController(mibBuilder)
-        logging.info("Configured SnmpDispatcher's MIB view controller to prevent MIB lookups.")
-
-
-    def _oid_to_tuple(self, oid_str):
-        """Converts an OID string to a tuple of integers."""
-        try:
-            return tuple(int(x) for x in oid_str.split('.'))
-        except ValueError:
-            logging.error(f"Invalid OID string format: {oid_str}. Cannot convert to tuple.")
-            return None
-
-    async def _snmp_get(self, ip, community, oid):
-        """
-        Helper method to perform a single SNMP GET operation.
-        It is resilient to timeouts and other SNMP errors, returning None on failure.
-        """
-        # Ensure OID is a clean string and convert to tuple
-        clean_oid = str(oid).strip()
-        if not clean_oid:
-            logging.error(f"Invalid (empty or whitespace-only) OID provided for SNMP GET for {ip}.")
-            return None
-        
-        oid_tuple = self._oid_to_tuple(clean_oid)
-        if oid_tuple is None:
-            return None
+    def __init__(self):
+        self.http_session = None # aiohttp client session for Prometheus queries
+        logging.info(f"SwitchAPIClient initialized. Prometheus URL: {self.PROMETHEUS_URL}")
 
         try:
-            errorIndication, errorStatus, errorIndex, varBinds = await get_cmd(
-                self.snmp_dispatcher,
-                CommunityData(community, mpModel=1),
-                await UdpTransportTarget.create((ip, 161), timeout=self.timeout, retries=self.retries),
-                # Directly create VarBind tuple with ObjectIdentifier and Null
-                (ObjectIdentifier(oid_tuple), rfc1902.Null()),
-                lookupMib=False # Explicitly disable MIB lookup
-            )
-            if errorIndication:
-                # Log the specific error indication
-                logging.warning(f"SNMP GET for {ip} on {clean_oid} failed with error indication: {errorIndication}")
-                return None
-            
-            if errorStatus:
-                # Log the specific error status
-                logging.warning(f"SNMP GET for {ip} on {clean_oid} failed with error status: {errorStatus.prettyPrint()}")
-                return None
+            self.redis_client = redis.Redis(host=self.REDIS_HOST, port=self.REDIS_PORT, db=0, decode_responses=True)
+            self.redis_client.ping()
+            logging.info(f"SwitchAPIClient successfully connected to Redis at {self.REDIS_HOST}:{self.REDIS_PORT}.")
+        except redis.exceptions.ConnectionError as e:
+            logging.error(f"SwitchAPIClient: Failed to connect to Redis for caching at {self.REDIS_HOST}:{self.REDIS_PORT}. Error: {e}")
+            self.redis_client = None
+        except Exception as e:
+            logging.error(f"SwitchAPIClient: Unexpected error during Redis connection test: {e}", exc_info=True)
+            self.redis_client = None
 
-            if varBinds and varBinds[0] and not isinstance(varBinds[0][1], rfc1902.Null):
-                return varBinds[0][1]
-            else:
-                # Log if Null or no varBinds, indicating 'no such object' or similar
-                if varBinds and varBinds[0] and isinstance(varBinds[0][1], rfc1902.Null):
-                    logging.warning(f"SNMP GET for {ip} on {clean_oid} returned Null value (likely 'no such object' or 'no such instance').")
+    async def _get_http_session(self):
+        """Ensures a single aiohttp client session is used."""
+        if self.http_session is None or self.http_session.closed:
+            self.http_session = aiohttp.ClientSession()
+        return self.http_session
+
+    async def _close_http_session(self):
+        """Closes the aiohttp client session."""
+        if self.http_session and not self.http_session.closed:
+            await self.http_session.close()
+            self.http_session = None
+
+    async def _query_prometheus(self, query):
+        """
+        Helper method to perform an asynchronous query against the Prometheus API.
+        """
+        encoded_query = query # No need to encode here, aiohttp handles it for params
+        url = f"{self.PROMETHEUS_URL}/api/v1/query"
+        session = await self._get_http_session()
+        
+        try:
+            async with session.get(url, params={'query': encoded_query}, timeout=10) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    logging.error(f"Prometheus HTTP error for query '{query}': {response.status} - {error_text}")
+                    return None
+                data = await response.json()
+                if data and data['status'] == 'success':
+                    return data['data']['result']
                 else:
-                    logging.warning(f"SNMP GET for {ip} on {clean_oid} returned no varBinds.")
-                return None # Explicitly return None if Null or empty varBinds
-        except PySnmpError as e:
-            logging.error(f"PySNMP error during SNMP GET for {ip} on {clean_oid}: {e}", exc_info=True)
+                    logging.warning(f"Prometheus query '{query}' returned non-success status or no data: {data}")
+                    return None
+        except aiohttp.ClientError as e:
+            logging.error(f"Network/Client error querying Prometheus for '{query}': {e}", exc_info=True)
+            return None
+        except asyncio.TimeoutError:
+            logging.error(f"Prometheus query '{query}' timed out after 10 seconds.")
+            return None
         except Exception as e:
-            logging.error(f"Unexpected exception during SNMP GET for {ip} on {clean_oid}: {e}", exc_info=True)
-        
-        return None
+            logging.error(f"Unexpected error during Prometheus query '{query}': {e}", exc_info=True)
+            return None
 
-    async def _snmp_walk(self, ip, community, oid):
+    async def get_switch_metrics(self, hostname, switch_ip):
         """
-        Helper method to perform an SNMP WALK operation.
-        It is resilient to timeouts and other SNMP errors, returning an empty dictionary on failure.
+        Fetches CPU, Memory utilization, and Uptime from Prometheus for a given switch.
+        Uses hostname for metrics that are labeled with it, and switch_ip (agent_host)
+        for metrics that might only have the agent_host label.
         """
-        results = {}
-        
-        # Ensure OID is a clean string and convert to tuple
-        clean_oid = str(oid).strip()
-        if not clean_oid:
-            logging.error(f"Invalid (empty or whitespace-only) OID provided for SNMP walk for {ip}.")
-            return {}
+        cache_key = f"switch_metrics:{hostname}"
+        if self.redis_client:
+            cached_data = self.redis_client.get(cache_key)
+            if cached_data:
+                logging.info(f"Returning cached switch metrics for {hostname}.")
+                return json.loads(cached_data)
 
-        oid_tuple = self._oid_to_tuple(clean_oid)
-        if oid_tuple is None:
-            return {}
-
-        try:
-            # Use ObjectIdentifier directly for the current OID and base OID
-            current_oid_varbind = (ObjectIdentifier(oid_tuple), rfc1902.Null())
-            base_oid_obj = ObjectIdentifier(oid_tuple)
-        except PySnmpError as e:
-            logging.error(f"PySNMP error initializing ObjectIdentifier for OID '{clean_oid}' for {ip}: {e}", exc_info=True)
-            return {}
-        except Exception as e:
-            logging.error(f"Unexpected exception initializing ObjectIdentifier for OID '{clean_oid}' for {ip}: {e}", exc_info=True)
-            return {}
-
-        try:
-            while True:
-                errorIndication, errorStatus, errorIndex, varBinds = await next_cmd(
-                    self.snmp_dispatcher,
-                    CommunityData(community, mpModel=1),
-                    await UdpTransportTarget.create((ip, 161), timeout=self.timeout, retries=self.retries),
-                    current_oid_varbind, # Pass the varbind tuple directly
-                    lexicographicMode=True,
-                    lookupMib=False # Explicitly disable MIB lookup
-                )
-
-                if errorIndication:
-                    # Log the specific error indication
-                    logging.warning(f"SNMP Walk for {ip} on {clean_oid} failed with error indication: {errorIndication}")
-                    break
-                
-                if errorStatus:
-                    # Log the specific error status
-                    logging.warning(f"SNMP Walk for {ip} on {clean_oid} failed with error status: {errorStatus.prettyPrint()}")
-                    break
-                
-                # varBinds is a sequence of sequences, get the first one
-                varBind = varBinds[0]
-                next_oid_obj, value = varBind
-
-                # Check if we've walked past the branch we're interested in
-                # Also check for EndOfMibView by its OID, which indicates the end of the walk
-                # We compare the string representation of the OID to be robust against type issues.
-                if not next_oid_obj.isPrefixOf(base_oid_obj) or str(next_oid_obj) == self.END_OF_MIB_VIEW_OID:
-                    if str(next_oid_obj) == self.END_OF_MIB_VIEW_OID:
-                        logging.info(f"SNMP Walk for {ip} on {clean_oid} terminated by EndOfMibView OID.")
-                    else:
-                        logging.info(f"SNMP Walk for {ip} on {clean_oid} completed (walked past base OID).")
-                    break
-                
-                results[str(next_oid_obj)] = value
-                
-                # Set the OID for the next request - create a new varbind for the next iteration
-                current_oid_varbind = (next_oid_obj, rfc1902.Null())
-
-        except PySnmpError as e:
-            logging.error(f"PySNMP error during SNMP walk for {ip} on {clean_oid}: {e}", exc_info=True)
-            return {}
-        except Exception as e:
-            logging.error(f"Unexpected exception during SNMP walk for {ip} on {clean_oid}: {e}", exc_info=True)
-            return {}
-
-        return results
-
-    def _parse_timeticks(self, timeticks):
-        """Converts SNMP timeticks to a human-readable string."""
-        if timeticks is None:
-            return "N/A"
-        try:
-            total_seconds = int(timeticks) / 100
-            return str(timedelta(seconds=total_seconds))
-        except (ValueError, TypeError):
-            return "N/A"
-
-    def _parse_env_status(self, value, entity_type):
-        """Parses environment monitor status codes."""
-        status_map = {
-            "fan": {1: "normal", 2: "warning", 3: "critical", 4: "shutdown", 5: "notPresent", 6: "notFunctioning"},
-            "power": {1: "normal", 2: "warning", 3: "critical", 4: "shutdown", 5: "notPresent", 6: "notFunctioning"},
-        }
-        try:
-            return status_map.get(entity_type, {}).get(int(value), "unknown")
-        except (ValueError, TypeError):
-            return "invalid"
-
-    def calculate_bitrate(self, current_octets: int, prev_octets: int, time_delta_secs: float) -> float:
-        """Calculates bitrate in kbps."""
-        if time_delta_secs <= 0 or current_octets < prev_octets:
-            return 0.0  # Avoid division by zero or counter reset issues
-        
-        delta_bytes = current_octets - prev_octets
-        delta_bits = delta_bytes * 8
-        bits_per_second = delta_bytes * 8 / time_delta_secs # Corrected calculation for bits per second
-        kbps = bits_per_second / 1000
-        return round(kbps, 2)
-
-    async def get_switch_details(self, ip, community, model, last_poll_data=None):
-        """
-        Fetches comprehensive details for a switch, calculates metrics, and identifies alarms.
-        last_poll_data is used for bitrate calculation and should contain 'timestamp' and 'interfaces'.
-        """
-        # Redundant import time within the method to ensure it's available
-        import time 
-        current_poll_time = time.time() # Capture current time at the start of the function
-
-        switch_details = {
-            "ip": ip,
-            "model": model,
-            "system_info": {"hostname": "N/A", "uptime": "N/A"},
-            "hardware_health": {
-                "cpu_utilization": "N/A",
-                "memory_utilization": "N/A",
-                "power_supplies": [],
-                "temperature_sensors": [],
-                "fans": []
-            },
-            "interfaces": [],
-            "api_errors": [], # This list will capture alarm messages
-            "timestamp": current_poll_time 
+        metrics = {
+            "cpu_utilization": "N/A",
+            "memory_utilization": "N/A",
+            "uptime": "N/A"
         }
 
-        # --- Create and run all SNMP tasks concurrently ---
-        tasks = {
-            "hostname": self._snmp_get(ip, community, self.SYS_HOSTNAME_OID),
-            "uptime": self._snmp_get(ip, community, self.SYS_UPTIME_OID),
-            "if_descr": self._snmp_walk(ip, community, self.IF_DESCR_OID),
-            "if_alias": self._snmp_walk(ip, community, self.IF_ALIAS_OID),
-            "if_admin_status": self._snmp_walk(ip, community, self.IF_ADMIN_STATUS_OID),
-            "if_oper_status": self._snmp_walk(ip, community, self.IF_OPER_STATUS_OID),
-            "if_in_octets": self._snmp_walk(ip, community, self.IF_IN_OCTETS_OID),
-            "if_out_octets": self._snmp_walk(ip, community, self.IF_OUT_OCTETS_OID),
-            "cpu": self._snmp_get(ip, community, self.CISCO_CPU_5MIN_OID),
-            "mem_used": self._snmp_walk(ip, community, self.CISCO_MEM_POOL_USED_OID),
-            "mem_free": self._snmp_walk(ip, community, self.CISCO_MEM_POOL_FREE_OID),
-            "fan_status": self._snmp_walk(ip, community, self.CISCO_ENV_MON_FAN_STATUS_OID),
-            "temp_value": self._snmp_walk(ip, community, self.CISCO_ENV_MON_TEMP_VALUE_OID),
-            "power_status": self._snmp_walk(ip, community, self.CISCO_ENV_MON_POWER_STATUS_OID),
-            "entity_names": self._snmp_walk(ip, community, self.ENTITY_PHYSICAL_NAME_OID)
-        }
-        
-        results = await asyncio.gather(*tasks.values())
-        results_map = dict(zip(tasks.keys(), results))
+        # Prometheus queries
+        # Note: Assuming 'job="telegraf_snmp"' as per previous frontend code
+        cpu_query = f'cisco_snmp_cpu_5min{{hostname="{hostname}", job="telegraf_snmp"}}'
+        mem_used_query = f'cisco_snmp_mem_used{{hostname="{hostname}", job="telegraf_snmp"}}'
+        mem_total_query = f'cisco_snmp_mem_total{{hostname="{hostname}", job="telegraf_snmp"}}' # Assuming a total memory metric
+        uptime_query = f'cisco_snmp_uptime{{hostname="{hostname}", job="telegraf_snmp"}} / (60*60*24)' # Uptime in days
 
-        # --- Process Results ---
-        # Note: API errors from _snmp_get/_snmp_walk are already logged internally.
-        # This loop is more for identifying missing data from the results_map.
-        for key, result in results_map.items():
-            if result is None or (isinstance(result, dict) and not result):
-                # Only add to api_errors if it's a critical piece of info that's missing
-                if key in ["hostname", "uptime", "cpu", "mem_used", "mem_free", "if_descr"]:
-                    switch_details["api_errors"].append(f"Critical data missing for {key} (likely SNMP timeout/error or no data).")
+        tasks = [
+            self._query_prometheus(cpu_query),
+            self._query_prometheus(mem_used_query),
+            self._query_prometheus(mem_total_query),
+            self._query_prometheus(uptime_query)
+        ]
 
+        cpu_result, mem_used_result, mem_total_result, uptime_result = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # System Info
-        hostname_val = results_map.get("hostname")
-        switch_details["system_info"]["hostname"] = str(hostname_val) if hostname_val else "N/A"
-        uptime_val = results_map.get("uptime")
-        switch_details["system_info"]["uptime"] = self._parse_timeticks(uptime_val)
-
-        # CPU and Memory
-        cpu_val = results_map.get("cpu")
-        if cpu_val is not None:
+        # Process CPU
+        if isinstance(cpu_result, list) and cpu_result:
             try:
-                switch_details["hardware_health"]["cpu_utilization"] = f"{int(cpu_val)}%"
-            except (ValueError, TypeError):
-                switch_details["api_errors"].append(f"Could not parse CPU utilization: {cpu_val}")
-        
-        mem_used_val = results_map.get("mem_used")
-        mem_free_val = results_map.get("mem_free")
-        if mem_used_val and mem_free_val:
+                metrics["cpu_utilization"] = float(cpu_result[0]['value'][1])
+            except (ValueError, KeyError, IndexError):
+                logging.warning(f"Could not parse CPU for {hostname}: {cpu_result}")
+
+        # Process Memory
+        if (isinstance(mem_used_result, list) and mem_used_result and
+            isinstance(mem_total_result, list) and mem_total_result):
             try:
-                total_used = sum(int(v) for v in mem_used_val.values())
-                total_free = sum(int(v) for v in mem_free_val.values())
-                total_mem = total_used + total_free
-                if total_mem > 0:
-                    mem_percent = (total_used / total_mem) * 100
-                    switch_details["hardware_health"]["memory_utilization"] = f"{mem_percent:.2f}%"
-            except (ValueError, TypeError) as e:
-                switch_details["api_errors"].append(f"Could not parse memory values: {e}")
+                used = float(mem_used_result[0]['value'][1])
+                total = float(mem_total_result[0]['value'][1])
+                if total > 0:
+                    metrics["memory_utilization"] = (used / total) * 100
+            except (ValueError, KeyError, IndexError):
+                logging.warning(f"Could not parse Memory for {hostname}: Used={mem_used_result}, Total={mem_total_result}")
 
-        # Environmentals (Fans, Temp, Power)
-        # Entity names are optional, provide a fallback
-        entity_names = {oid.split('.')[-1]: str(name) for oid, name in (results_map.get("entity_names") or {}).items()}
+        # Process Uptime
+        if isinstance(uptime_result, list) and uptime_result:
+            try:
+                metrics["uptime"] = float(uptime_result[0]['value'][1])
+            except (ValueError, KeyError, IndexError):
+                logging.warning(f"Could not parse Uptime for {hostname}: {uptime_result}")
 
-        fan_status_val = results_map.get("fan_status")
-        if fan_status_val:
-            for oid, status in fan_status_val.items():
-                index = oid.split('.')[-1]
-                fan_entry = {
-                    "name": entity_names.get(index, f"Fan {index}"),
-                    "status": self._parse_env_status(status, "fan")
-                }
-                switch_details["hardware_health"]["fans"].append(fan_entry)
-                # Alarm logic for fans
-                if fan_entry["status"] not in ["normal", "notPresent", "unknown"]: # Consider 'unknown' as non-alarming for now
-                    switch_details["api_errors"].append(f"Fan '{fan_entry['name']}' is in '{fan_entry['status']}' state.")
+        if self.redis_client:
+            self.redis_client.setex(cache_key, self.CACHE_TTL_SECONDS, json.dumps(metrics))
+            logging.info(f"Cached switch metrics for {hostname}.")
 
+        return metrics
 
-        power_status_val = results_map.get("power_status")
-        if power_status_val:
-            for oid, status in power_status_val.items():
-                index = oid.split('.')[-1]
-                psu_entry = {
-                    "name": entity_names.get(index, f"Power Supply {index}"),
-                    "status": self._parse_env_status(status, "power")
-                }
-                switch_details["hardware_health"]["power_supplies"].append(psu_entry)
-                # Alarm logic for power supplies
-                if psu_entry["status"] not in ["normal", "notPresent", "unknown"]: # Consider 'unknown' as non-alarming for now
-                    switch_details["api_errors"].append(f"Power Supply '{psu_entry['name']}' is in '{psu_entry['status']}' state.")
+    async def get_interface_details(self, switch_ip):
+        """
+        Fetches detailed interface information for a specific switch from Prometheus.
+        This will involve querying multiple metrics and consolidating them by ifIndex.
+        """
+        cache_key = f"switch_interfaces:{switch_ip}"
+        if self.redis_client:
+            cached_data = self.redis_client.get(cache_key)
+            if cached_data:
+                logging.info(f"Returning cached interface details for {switch_ip}.")
+                return json.loads(cached_data)
 
+        interfaces = {} # Key: ifIndex, Value: interface_data_dict
 
-        temp_value_val = results_map.get("temp_value")
-        if temp_value_val:
-            for oid, value in temp_value_val.items():
-                index = oid.split('.')[-1]
-                try:
-                    temp_celsius = int(value)
-                    temp_entry = {
-                        "name": entity_names.get(index, f"Temp Sensor {index}"),
-                        "temperature_celsius": temp_celsius
-                    }
-                    switch_details["hardware_health"]["temperature_sensors"].append(temp_entry)
-                    # Alarm logic for temperature (e.g., threshold > 60 degrees Celsius)
-                    if temp_celsius > 60:
-                        switch_details["api_errors"].append(f"High Temperature on '{temp_entry['name']}': {temp_celsius}°C (Threshold: 60°C).")
-                except (ValueError, TypeError):
-                     switch_details["api_errors"].append(f"Could not parse temperature value for sensor index {index}: {value}")
+        # List of Prometheus metrics to fetch for interfaces, using agent_host (switch_ip)
+        # Note: These metric names are based on the original frontend's Prometheus queries.
+        metrics_to_query = {
+            "ifAdminStatus": f'interfaces_ifAdminStatus{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifInDiscards": f'interfaces_ifInDiscards{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifInErrors": f'interfaces_ifInErrors{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifInOctets": f'interfaces_ifInOctets{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifInUcastPkts": f'interfaces_ifInUcastPkts{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifInUnknownProtos": f'interfaces_ifInUnknownProtos{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifLastChange": f'interfaces_ifLastChange{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifMtu": f'interfaces_ifMtu{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifOperStatus": f'interfaces_ifOperStatus{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifOutDiscards": f'interfaces_ifOutDiscards{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifOutErrors": f'interfaces_ifOutErrors{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifOutOctets": f'interfaces_ifOutOctets{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifOutUcastPkts": f'interfaces_ifOutUcastPkts{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifSpeed": f'interfaces_ifSpeed{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifType": f'interfaces_ifType{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifDescr": f'interfaces_ifDescr{{agent_host="{switch_ip}", job="telegraf_snmp"}}',
+            "ifAlias": f'interfaces_ifAlias{{agent_host="{switch_ip}", job="telegraf_snmp"}}'
+        }
 
-        # Interfaces
-        if_descr = results_map.get("if_descr")
-        if if_descr:
-            admin_status_map = {1: "up", 2: "down", 3: "testing"}
-            oper_status_map = {1: "up", 2: "down", 3: "testing", 4: "unknown", 5: "dormant", 6: "notPresent", 7: "lowerLayerDown"}
+        tasks = [self._query_prometheus(query) for query in metrics_to_query.values()]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            prev_interfaces_map = {iface['index']: iface for iface in last_poll_data.get("interfaces", [])} if last_poll_data and isinstance(last_poll_data.get("interfaces"), list) else {}
-            time_delta = current_poll_time - last_poll_data.get("timestamp", 0) if last_poll_data else 0
+        metric_names = list(metrics_to_query.keys())
+        for i, result in enumerate(results):
+            metric_name = metric_names[i]
+            if isinstance(result, list):
+                for item in result:
+                    try:
+                        ifIndex = int(item['metric']['ifIndex'])
+                        if ifIndex not in interfaces:
+                            interfaces[ifIndex] = {"ifIndex": ifIndex, "name": f"Interface {ifIndex}"}
 
-            for oid, name in if_descr.items():
-                if_index = oid.split('.')[-1]
-                
-                try:
-                    admin_status_val = int(results_map.get("if_admin_status", {}).get(f"{self.IF_ADMIN_STATUS_OID}.{if_index}", 0))
-                    oper_status_val = int(results_map.get("if_oper_status", {}).get(f"{self.IF_OPER_STATUS_OID}.{if_index}", 0))
-                    in_octets = int(results_map.get("if_in_octets", {}).get(f"{self.IF_IN_OCTETS_OID}.{if_index}", 0))
-                    out_octets = int(results_map.get("if_out_octets", {}).get(f"{self.IF_OUT_OCTETS_OID}.{if_index}", 0))
+                        value = item['value'][1]
+                        if metric_name in ["ifAdminStatus", "ifOperStatus", "ifType", "ifMtu", "ifSpeed",
+                                           "ifInOctets", "ifInUcastPkts", "ifInDiscards", "ifInErrors", "ifInUnknownProtos",
+                                           "ifOutOctets", "ifOutUcastPkts", "ifOutDiscards", "ifOutErrors"]:
+                            interfaces[ifIndex][metric_name] = float(value)
+                        elif metric_name == "ifLastChange":
+                            # Prometheus timestamp is seconds since epoch, convert to ISO 8601
+                            interfaces[ifIndex][metric_name] = datetime.fromtimestamp(float(value)).isoformat() + "Z"
+                        else: # ifDescr, ifAlias
+                            interfaces[ifIndex][metric_name] = value
+                    except (ValueError, KeyError, IndexError) as e:
+                        logging.warning(f"Error parsing Prometheus data for {metric_name} on ifIndex {item.get('metric', {}).get('ifIndex', 'N/A')}: {e}. Item: {item}")
+            elif isinstance(result, Exception):
+                logging.error(f"Error fetching {metric_name} from Prometheus for {switch_ip}: {result}")
 
-                    admin_status = admin_status_map.get(admin_status_val, "unknown")
-                    oper_status = oper_status_map.get(oper_status_val, "unknown")
+        interfaces_list = list(interfaces.values())
+        
+        if self.redis_client:
+            self.redis_client.setex(cache_key, self.CACHE_TTL_SECONDS, json.dumps(interfaces_list))
+            logging.info(f"Cached interface details for {switch_ip}.")
 
-                    in_kbps = 0
-                    out_kbps = 0
-                    prev_iface = prev_interfaces_map.get(if_index)
-                    if prev_iface:
-                        in_kbps = self.calculate_bitrate(in_octets, prev_iface.get('in_octets', 0), time_delta)
-                        out_kbps = self.calculate_bitrate(out_octets, prev_iface.get('out_octets', 0), time_delta)
-
-                    interface_entry = {
-                        "index": if_index,
-                        "name": str(name),
-                        "alias": str(results_map.get("if_alias", {}).get(f"{self.IF_ALIAS_OID}.{if_index}", "")),
-                        "admin_status": admin_status,
-                        "oper_status": oper_status,
-                        "in_octets": in_octets,
-                        "out_octets": out_octets,
-                        "in_kbps": in_kbps,
-                        "out_kbps": out_kbps,
-                    }
-                    switch_details["interfaces"].append(interface_entry)
-
-                    # Alarm logic for interfaces: admin up but operational down
-                    if admin_status == "up" and oper_status in ["down", "lowerLayerDown"]:
-                        switch_details["api_errors"].append(f"Interface {interface_entry['name']} ({interface_entry['alias']}) is operationally DOWN (Admin: UP).")
-                    # Any other operational down status
-                    elif oper_status == "down":
-                        switch_details["api_errors"].append(f"Interface {interface_entry['name']} ({interface_entry['alias']}) operational status is DOWN.")
-
-                except (ValueError, TypeError, KeyError) as e:
-                    switch_details["api_errors"].append(f"Could not process interface index {if_index}: {e}")
-
-        return switch_details
+        return interfaces_list
 
 # Global instance of the client
-switch_api_client = SwitchAPIClient(timeout=15, retries=2)
+switch_api_client = SwitchAPIClient()
