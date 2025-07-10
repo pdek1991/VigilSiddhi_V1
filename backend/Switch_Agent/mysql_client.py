@@ -361,7 +361,7 @@ class MySQLManager:
         return self._execute_query(query, params, commit=True)
 
     def get_switch_configs(self):
-        query = "SELECT switch_ip, hostname, domain, community, model, frontend_block_id FROM switch_configs limit 30"
+        query = "SELECT switch_ip, hostname, domain, community, model, frontend_block_id FROM switch_configs WHERE model = 'cisco' AND domain = 'BCAKUP'"
         return self._execute_query(query, fetch_all=True)
 
     def get_switch_config_by_ip(self, switch_ip):
