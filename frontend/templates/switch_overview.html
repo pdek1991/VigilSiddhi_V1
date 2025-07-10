@@ -3,563 +3,1275 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VigilSiddhi - Switch Overview</title>
+    <title>VigilSiddhi - Live Switch Overview</title>
     <link rel="icon" type="image/gif" href="/static/logo.gif">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* Custom styles for modern UI and responsiveness */
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #080808; /* Dark background */
-            color: #e2e8f0; /* Light text */
-            overflow-x: hidden; /* Prevent horizontal scrolling */
-            min-height: 100vh; /* Occupy whole window height */
+        /* Custom scrollbar for dark theme */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1a202c; /* Darker track */
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4a5568; /* Greyish thumb */
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6a768c; /* Lighter grey on hover */
+        }
+
+        /* Keyframe animation for subtle floating effect */
+        @keyframes float {
+            0% { transform: translateY(0px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+            50% { transform: translateY(-5px); box-shadow: 0 10px 20px rgba(0,0,0,0.5); }
+            100% { transform: translateY(0px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        }
+
+        /* Keyframe animation for background gradient */
+        @keyframes backgroundGradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        /* Base styles for a modern dark theme with liquid paper feel */
+        html, body {
+            height: 100%;
+            width: 100%;
             margin: 0;
             padding: 0;
-            display: flex;
-            flex-direction: column;
-            /* align-items: center; /* Removed to allow full width stretch */
-        }
-
-        /* Header styling from main dashboard for consistency */
-        .dashboard-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 1rem;
-            padding: 0.75rem 1.5rem;
-            width: 100%;
-            box-sizing: border-box;
-            position: relative;
-        }
-        .dashboard-logo-container {
-            flex-shrink: 0;
-            display: flex;
-            align-items: center;
-            padding-right: 1.5rem;
-        }
-        .dashboard-logo {
-            max-width: 100px;
-            height: auto;
-            border-radius: 0.5rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-        }
-        .dashboard-title {
-            flex-grow: 1;
-            text-align: center;
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: #63b3ed;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-            margin: 0;
-        }
-        .menu-icon {
-            cursor: pointer;
-            font-size: 1.8rem;
-            color: #a0aec0;
-            padding: 0.5rem;
-            border-radius: 0.375rem;
-            transition: background-color 0.2s ease-in-out;
-        }
-        .menu-icon:hover {
-            background-color: #4a5568;
-        }
-        .dropdown-menu {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            background-color: #2d3748;
-            border-radius: 0.5rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
-            z-index: 1000;
-            min-width: 150px;
-            padding: 0.5rem 0;
-        }
-        .dropdown-menu a {
-            display: block;
-            padding: 0.75rem 1rem;
+            font-family: 'Inter', sans-serif;
+            /* Liquid background gradient */
+            background: linear-gradient(135deg, #0f172a, #1a273a, #0f172a);
+            background-size: 400% 400%;
+            animation: backgroundGradient 15s ease infinite;
             color: #e2e8f0;
-            text-decoration: none;
-            transition: background-color 0.2s ease-in-out;
-        }
-        .dropdown-menu a:hover {
-            background-color: #4a5568;
-        }
-
-
-        /* Main content styling */
-        .main-content {
-            width: 100%;
-            padding: 1.5rem 1.5rem; /* Adjusted padding to match header's horizontal padding */
-            box-sizing: border-box;
-            flex-grow: 1;
             display: flex;
             flex-direction: column;
+            overflow-x: hidden;
         }
 
-        .switch-grid {
-            display: grid;
-            /* Increased minmax for larger blocks, aiming for 6-8 per row on large screens */
-            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-            gap: 1rem; /* Slightly increased gap for larger blocks */
-            width: 100%;
-            padding-top: 1rem;
-            padding-bottom: 2rem;
+        /* Header styling */
+        h2 {
+            text-shadow: 0 0 10px rgba(129, 202, 253, 0.6); /* Soft blue glow for title */
         }
 
-        .switch-card {
-            background-color: #1a202c;
-            border-radius: 1.5rem; /* More rounded corners */
-            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
-            padding: 1rem; /* Increased padding for larger content */
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        /* Refresh Button Styling */
+        #refreshButton {
+            background-image: linear-gradient(to right, #6366f1, #818cf8); /* Purple-blue gradient */
+            border: none;
             position: relative;
             overflow: hidden;
-            min-height: 140px; /* Increased min height for larger cards */
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
+            will-change: transform, box-shadow; /* Optimize for animations */
+        }
+        #refreshButton:hover {
+            background-image: linear-gradient(to right, #4f46e5, #6366f1); /* Darker gradient on hover */
+            transform: translateY(-3px); /* More pronounced lift */
+            box-shadow: 0 8px 16px rgba(99, 102, 241, 0.4); /* Matching shadow */
+        }
+        #refreshButton:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(99, 102, 241, 0.2);
+        }
+        #refreshButton::before { /* Ripple effect on click */
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            background: rgba(255, 255, 255, 0.25);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            opacity: 0;
+            transition: width 0.4s ease-out, height 0.4s ease-out, opacity 0.4s ease-out;
+        }
+        #refreshButton:active::before {
+            width: 200%;
+            height: 200%;
+            opacity: 1;
+            transition: 0s;
         }
 
+        /* Switch Card Styling - "Floating Paper" */
+        .switch-card {
+            background-color: rgba(30, 41, 59, 0.7); /* Translucent dark blue-gray */
+            backdrop-filter: blur(10px); /* Frosted glass effect */
+            border-radius: 1rem; /* More rounded corners */
+            padding: 1.25rem;
+            transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); /* Smoother, bouncier transition */
+            position: relative;
+            border: 1px solid rgba(71, 85, 105, 0.5); /* Softer border */
+            cursor: pointer;
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.05) inset; /* Multi-layer shadow for depth and inner glow */
+            overflow: hidden;
+            animation: float 6s ease-in-out infinite; /* Apply floating animation */
+            will-change: transform, box-shadow, background-color; /* Optimize for animations */
+        }
         .switch-card:hover {
-            transform: translateY(-8px) scale(1.02);
-            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.6);
+            transform: translateY(-8px) scale(1.04); /* More pronounced lift and scale */
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 0 2px rgba(255,255,255,0.1) inset; /* Deeper shadow on hover */
+            background-color: rgba(30, 41, 59, 0.85); /* Slightly less translucent on hover */
+            z-index: 2;
+        }
+        /* Status colors */
+        .status-ok { color: #34d399; } /* Green */
+        .status-problem { color: #f56565; } /* Red */
+        .status-stale {
+            border: 1px solid #6b7280; /* Grey border for stale data */
+            filter: grayscale(80%) brightness(80%); /* More pronounced desaturation/dimming */
+            opacity: 0.7; /* More faded */
+            animation: none; /* Stop floating animation when stale */
+        }
+        /* Problem border for cards */
+        .switch-card.problem-border {
+            border: 2px solid #f56565; /* Red border when there's a problem */
+            box-shadow: 0 8px 20px rgba(245, 101, 101, 0.3), 0 0 0 1px rgba(245,101,101,0.2) inset; /* Red glow */
+        }
+        .switch-card.ok-border {
+            border: 2px solid #34d399; /* Green border when status is OK */
+            box-shadow: 0 8px 20px rgba(52, 211, 153, 0.3), 0 0 0 1px rgba(52,211,153,0.2) inset; /* Green glow */
         }
 
-        .switch-header {
-            display: flex;
-            /* Changed to flex-start to align hostname to left without model */
-            justify-content: flex-start;
-            align-items: flex-start;
-            margin-bottom: 0.6rem; /* Increased margin */
-        }
-
-        .switch-header h3 {
-            font-size: 1.1rem; /* Increased hostname font size */
-            font-weight: 700;
-            line-height: 1.2;
-            word-break: break-word; /* Allow long hostnames to wrap */
-        }
-
-        /* New hostname color classes */
-        .hostname-nexus {
-            color: #63b3ed; /* Blue for Nexus */
-        }
-        .hostname-cisco {
-            color: #faf6f6; /* Lighter gray/black for Cisco (similar to original, but explicit) */
-        }
-
-
-        .switch-model {
-            /* This class is no longer used for display but kept for reference if needed elsewhere */
-            display: none; /* Hide the model display */
-        }
-
-        .switch-details p {
-            font-size: 0.85rem; /* Increased details font size */
-            color: #a0aec0;
-            margin-bottom: 0.4rem; /* Increased margin */
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 0.3rem 0.7rem; /* Increased padding */
-            border-radius: 0.5rem;
-            font-size: 0.8rem; /* Increased font size */
-            font-weight: 600;
-            margin-top: 0.6rem; /* Increased margin */
-            text-transform: uppercase;
-        }
-
-        .status-ok { background-color: #10b981; color: white; }
-        .status-problem { background-color: #ef4444; color: white; }
-        .status-unknown { background-color: #6b7280; color: white; }
-
-        /* Hover Details overlay */
-        .hover-details-overlay {
+        /* Hover Details Pop-up Styling */
+        .hover-details {
+            display: none;
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0, 0, 0, 0.98); /* Darker overlay for better contrast */
-            border-radius: 1.5rem; /* Match card border-radius */
+            background-color: rgba(30, 41, 59, 0.95); /* Slightly darker translucent */
+            backdrop-filter: blur(12px); /* Stronger blur for pop-up */
+            border-radius: 1rem;
+            padding: 1.5rem; /* More padding */
+            z-index: 20;
+            box-shadow: inset 0 0 30px rgba(0,0,0,0.8); /* Deeper inner shadow */
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.3s ease, visibility 0.3s ease;
-            padding: 1rem; /* Increased padding */
-            box-sizing: border-box;
             text-align: center;
+            opacity: 0;
+            transition: opacity 0.4s ease-in-out;
             overflow-y: auto;
-            scrollbar-width: thin;
-            scrollbar-color: #4a5568 #2d3748;
+            word-wrap: break-word;
+            pointer-events: none; /* Allow clicks to pass through when not visible */
         }
-
-        .hover-details-overlay::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        .hover-details-overlay::-webkit-scrollbar-track {
-            background: #2d3748;
-            border-radius: 10px;
-        }
-
-        .hover-details-overlay::-webkit-scrollbar-thumb {
-            background-color: #4a5568;
-            border-radius: 10px;
-            border: 2px solid #2d3748;
-        }
-
-        .switch-card:hover .hover-details-overlay {
+        .switch-card:hover .hover-details {
             opacity: 1;
-            visibility: visible;
+            pointer-events: auto; /* Enable clicks when visible */
         }
-
-        .hover-details-overlay h4 {
-            font-size: 1rem; /* Increased font size */
-            font-weight: 600;
-            color: #63b3ed;
-            margin-bottom: 0.75rem; /* Increased margin */
-        }
-
-        .interface-list {
-            list-style: none;
-            padding: 0;
-            margin: 0;
+        .hover-details .interface-list {
             width: 100%;
-            max-width: 200px; /* Increased max-width for list items */
+            padding: 0;
+            list-style: none;
+            margin-top: 0.75rem;
         }
-
-        .interface-list li {
-            background-color: #2d3748;
-            padding: 0.5rem 0.75rem; /* Increased padding */
+        .hover-details .interface-list li {
+            background-color: rgba(51, 65, 85, 0.9); /* Translucent list item background */
+            padding: 0.5rem 0.75rem;
             border-radius: 0.5rem;
-            margin-bottom: 0.3rem; /* Increased margin */
-            font-size: 0.8rem; /* Increased font size */
-            display: flex;
-            justify-content: space-between;
+            margin-bottom: 0.4rem;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2); /* Subtle shadow on list items */
+            color: #f56565;
+            font-size: 0.85rem; /* Slightly larger font */
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .hover-details .interface-list li:last-child {
+            margin-bottom: 0;
+        }
+        .hover-details h4 {
+            margin-bottom: 0.75rem;
+            color: #a78bfa; /* Soft purple heading */
+            font-size: 1.1rem;
+            text-shadow: 0 0 5px rgba(167, 139, 250, 0.4);
+        }
+        .hover-details p.text-gray-400 {
+            font-size: 0.9rem;
+            color: #cbd5e1; /* Lighter gray for better contrast */
+        }
+
+        /* Main content area padding for responsiveness */
+        main {
+            padding: 2rem;
+        }
+        @media (min-width: 640px) { /* sm */
+            main { padding: 3rem; }
+        }
+        @media (min-width: 1024px) { /* lg */
+            main { padding: 4rem; }
+        }
+
+        /* Grid Layout Adjustments for smaller blocks */
+        #switch-grid {
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); /* Slightly larger min-width for cards */
+            gap: 1.5rem; /* Increased gap */
+        }
+        @media (min-width: 640px) { /* sm */
+            #switch-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+        }
+        @media (min-width: 768px) { /* md */
+            #switch-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+        }
+        @media (min-width: 1024px) { /* lg */
+            #switch-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+        }
+        @media (min-width: 1280px) { /* xl */
+            #switch-grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
+        }
+
+        /* Modal specific styles for consistency */
+        .modal {
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.7); /* Slightly less opaque overlay */
+            display: flex !important;
+            justify-content: center;
             align-items: center;
-            word-break: break-all;
+        }
+        .modal.hidden {
+            display: none !important;
         }
 
-        .interface-list li strong {
+        .modal-content {
+            background-color: rgba(30, 41, 59, 0.8); /* Translucent dark blue-gray */
+            backdrop-filter: blur(15px); /* Stronger blur for modal */
+            border-radius: 1.25rem; /* More rounded */
+            box-shadow: 0 20px 50px rgba(0,0,0,0.7), 0 0 0 2px rgba(255,255,255,0.08) inset; /* Deeper shadow with inner glow */
+            margin: auto;
+            padding: 2.5rem;
+            width: 90%; /* Adjust width for better fit */
+            max-width: 1500px; /* Increased max width */
+            position: relative;
+            max-height: 95vh; /* Allow more height */
+            overflow-y: auto;
+            border: 1px solid rgba(71, 85, 105, 0.6); /* Softer border */
+        }
+        .close-button {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            font-size: 2rem;
+            font-weight: bold;
+            color: #a0aec0; /* Lighter grey */
+            cursor: pointer;
+            transition: color 0.2s ease;
+        }
+        .close-button:hover {
+            color: #e2e8f0; /* White on hover */
+        }
+
+        .interface-table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            margin-top: 1.5rem; /* More space above table */
+            border-radius: 0.75rem; /* More rounded table corners */
+            overflow: hidden;
+            background-color: rgba(30, 41, 59, 0.5); /* Slightly lighter translucent background for table */
+        }
+        .interface-table th, .interface-table td {
+            padding: 1rem 1.25rem;
+            text-align: left;
+            border-bottom: 1px solid rgba(71, 85, 105, 0.4); /* Softer border */
+            min-width: 150px; /* Increased min-width for columns */
+            word-wrap: break-word; /* Allow word wrap */
+            white-space: normal; /* Override nowrap for wrapping */
+            position: relative;
+        }
+        .interface-table th {
+            background-color: rgba(45, 55, 72, 0.8); /* Darker translucent header */
+            font-weight: 600;
+            color: #a0aec0;
+            position: sticky;
+            top: 0;
+            z-index: 10; /* Ensure header stays on top of content when scrolling */
+            word-wrap: break-word;
+            white-space: normal;
+        }
+        .interface-table tr:last-child td {
+            border-bottom: none;
+        }
+        .interface-table tbody tr:nth-child(even) {
+            background-color: rgba(45, 55, 72, 0.4); /* Even rows slightly different translucent shade */
+        }
+        .interface-table tbody tr:hover {
+            background-color: rgba(71, 85, 105, 0.6); /* More prominent hover effect */
+        }
+        /* Status colors for modal table */
+        .status-up { color: #34d399; }
+        .status-down { color: #ef4444; }
+        .status-testing { color: #facc15; }
+        .status-unknown { color: #9ca3af; }
+        .status-dormant { color: #60a5fa; }
+        .status-notPresent { color: #ef4444; }
+        .status-lowerLayerDown { color: #fb923c; }
+
+        /* Filter input styling */
+        .filter-input {
+            background-color: rgba(30, 41, 59, 0.7); /* Translucent filter input */
+            border: 1px solid rgba(71, 85, 105, 0.5);
+            border-radius: 0.5rem; /* More rounded */
+            padding: 0.6rem 1rem; /* More padding */
             color: #e2e8f0;
+            font-size: 0.95rem; /* Slightly larger font */
+            width: 100%;
+            box-sizing: border-box;
+            will-change: border-color, box-shadow;
+        }
+        .filter-input::placeholder {
+            color: #a0aec0;
+        }
+        .filter-input:focus {
+            outline: none;
+            border-color: #60a5fa;
+            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.4); /* Softer, wider glow */
         }
 
-        .interface-status-ok { color: #10b981; }
-        .interface-status-down { color: #ef4444; font-weight: bold; }
-
-        /* Responsive adjustments */
-        @media (max-width: 1200px) { /* Adjust for slightly smaller screens to keep more columns */
-            .switch-grid {
-                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-            }
-        }
-        @media (max-width: 900px) { /* Medium tablets */
-            .switch-grid {
-                grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-                gap: 0.75rem;
-            }
-            .switch-card {
-                min-height: 120px;
-                padding: 0.8rem;
-            }
-            .switch-header h3 {
-                font-size: 1rem;
-            }
-            .switch-model {
-                font-size: 0.7rem;
-            }
-            .switch-details p {
-                font-size: 0.75rem;
-            }
-            .status-badge {
-                font-size: 0.7rem;
-            }
-            .hover-details-overlay h4 {
-                font-size: 0.9rem;
-            }
-            .interface-list li {
-                font-size: 0.75rem;
-            }
+        /* Resizer styles */
+        .resizer {
+            position: absolute;
+            right: 0;
+            top: 0;
+            height: 100%;
+            width: 10px; /* Make it wider for easier grabbing */
+            background: rgba(96, 165, 250, 0.2); /* Subtle blue */
+            cursor: col-resize;
+            user-select: none;
+            transition: background-color 0.2s ease, opacity 0.2s ease;
+            opacity: 0;
         }
 
-        @media (max-width: 768px) { /* Smaller tablets/large phones */
-            .main-content {
-                padding: 1rem;
-            }
-            .switch-grid {
-                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); /* Go back to fewer columns */
-                gap: 0.75rem;
-            }
-            .switch-card {
-                padding: 0.9rem;
-                min-height: 130px;
-            }
-            .switch-header h3 {
-                font-size: 1rem;
-            }
-            .switch-model {
-                font-size: 0.7rem;
-            }
-            .switch-details p {
-                font-size: 0.8rem;
-            }
-            .status-badge {
-                font-size: 0.75rem;
-            }
-            .hover-details-overlay h4 {
-                font-size: 0.95rem;
-            }
-            .interface-list li {
-                font-size: 0.75rem;
-                padding: 0.4rem 0.6rem;
-            }
+        .resizer:hover,
+        .resizing .resizer {
+            opacity: 1;
+            background-color: rgba(96, 165, 250, 0.5); /* More prominent on hover/resizing */
         }
-
-        @media (max-width: 480px) {
-            .main-content {
-                padding: 0.75rem;
-            }
-            .switch-grid {
-                grid-template-columns: 1fr; /* Single column on very small screens */
-                gap: 0.75rem;
-            }
-            .switch-card {
-                min-height: 120px;
-            }
-            .dashboard-title {
-                font-size: 1.2rem;
-            }
+        body.resizing {
+            cursor: col-resize;
+            user-select: none;
         }
     </style>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 </head>
-<body>
-    <header class="dashboard-header">
-        <div class="flex items-center">
-            <div class="menu-icon mr-4" onclick="toggleMenu()">
-                <i class="fas fa-bars"></i>
-            </div>
-            <div id="dropdown-menu" class="dropdown-menu hidden">
-                <a href="/?view=dashboard" target="_blank" rel="noopener noreferrer">Dashboard</a>
-                <a href="https://img-cdn.publive.online/fit-in/1280x960/filters:format(webp)/afaqs/media/post_attachments/3ffb6c3ced5b4ef914c73a09af551d4666f6367.png" target="_blank" rel="noopener noreferrer">Trending</a>
-                <a href="/ird_overview" target="_blank" rel="noopener noreferrer">IRD Overview</a>
-                <a href="/switch_overview" onclick="window.open(this.href, '_blank'); return false;" target="_blank" rel="noopener noreferrer">Switch Overview</a>
-                <a href="/config.html" target="_blank" rel="noopener noreferrer">Config</a>
+<body class="flex flex-col min-h-screen">
+    <main class="flex-grow p-4 sm:p-6 lg:p-8">
+        <h2 class="text-3xl font-extrabold text-center text-blue-400 mb-8 tracking-tight">Live Network Switch Status</h2>
+        <div class="flex justify-center mb-6">
+            <button id="refreshButton" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-lg transition duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75">
+                <i class="fas fa-sync-alt mr-2"></i>Refresh Data
+            </button>
+        </div>
+        <!-- Adjusted grid for smaller cards -->
+        <div id="switch-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-5">
+            <div id="loading-indicator" class="col-span-full text-center py-12">
+                <i class="fas fa-spinner fa-spin text-4xl text-gray-400"></i>
+                <p class="mt-2 text-gray-400">Loading switch data from Prometheus...</p>
             </div>
         </div>
-        <div class="dashboard-logo-container">
-            <img src="/static/logo.gif" alt="VigilSiddhi Logo" class="dashboard-logo" onerror="this.onerror=null;this.src='https://placehold.co/80x80/63b3ed/ffffff?text=VigilSiddhi+Logo';">
-        </div>
-        <!-- <h1 class="dashboard-title">Switch Overview</h1> -->
-        <div></div>
-    </header>
+    </main>
 
-    <div class="main-content">
-        <h2 class="text-2xl font-bold text-center text-blue-300 mb-6">Network Switch Status Overview</h2>
-        <div id="switch-grid" class="switch-grid">
-            <!-- Switch cards will be loaded here by JavaScript -->
-            <div class="text-center text-gray-400 col-span-full py-10" id="loading-indicator">
-                <i class="fas fa-spinner fa-spin text-4xl mb-4"></i>
-                <p>Loading switch data...</p>
-            </div>
-            <div class="text-center text-red-400 col-span-full py-10 hidden" id="error-message">
-                <i class="fas fa-exclamation-triangle text-4xl mb-4"></i>
-                <p>Failed to load switch data. Please check the backend connection.</p>
-            </div>
-            <div class="text-center text-gray-400 col-span-full py-10 hidden" id="no-data-message">
-                <p>No switch data available. Please ensure switches are configured and monitoring is active.</p>
+    <!-- Interface Details Modal -->
+    <div id="interfaceDetailsModal" class="modal hidden">
+        <div class="modal-content">
+            <span class="close-button" onclick="closeModal()">&times;</span>
+            <h3 id="modalSwitchHostname" class="text-2xl font-bold text-blue-400 mb-4"></h3>
+            <div id="modalContent" class="overflow-x-auto">
+                <div id="modalLoading" class="text-center py-8">
+                    <i class="fas fa-spinner fa-spin text-3xl text-gray-400"></i>
+                    <p class="mt-2 text-gray-400">Loading interface data...</p>
+                </div>
+                <div id="modalError" class="text-center py-8 text-red-400 hidden">
+                    <p>Failed to load interface details.</p>
+                </div>
+                <div id="interfaceTableContainer" class="hidden">
+                    <!-- Filter inputs for the table -->
+                    <div class="mb-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                        <input type="text" id="filter-interface" class="filter-input" placeholder="Filter Interface" data-column-index="0">
+                        <select id="filter-admin-status" class="filter-input" data-column-index="1">
+                            <option value="">Filter Admin Status</option>
+                            <option value="up">Up</option>
+                            <option value="down">Down</option>
+                            <option value="testing">Testing</option>
+                            <option value="unknown">Unknown</option>
+                        </select>
+                        <select id="filter-oper-status" class="filter-input" data-column-index="2">
+                            <option value="">Filter Oper Status</option>
+                            <option value="up">Up</option>
+                            <option value="down">Down</option>
+                            <option value="testing">Testing</option>
+                            <option value="unknown">Unknown</option>
+                            <option value="dormant">Dormant</option>
+                            <option value="not present">Not Present</option>
+                            <option value="lower layer down">Lower Layer Down</option>
+                        </select>
+                        <input type="text" id="filter-speed" class="filter-input" placeholder="Filter Speed" data-column-index="3">
+                        <input type="text" id="filter-in-octets" class="filter-input" placeholder="Filter In Octets" data-column-index="4">
+                        <input type="text" id="filter-out-octets" class="filter-input" placeholder="Filter Out Octets" data-column-index="5">
+                        <input type="text" id="filter-in-discards" class="filter-input" placeholder="Filter In Discards" data-column-index="6">
+                        <input type="text" id="filter-in-errors" class="filter-input" placeholder="Filter In Errors" data-column-index="7">
+                        <input type="text" id="filter-in-unicast-pkts" class="filter-input" placeholder="Filter In Unicast Pkts" data-column-index="8">
+                        <input type="text" id="filter-out-discards" class="filter-input" placeholder="Filter Out Discards" data-column-index="9">
+                        <input type="text" id="filter-out-errors" class="filter-input" placeholder="Filter Out Errors" data-column-index="10">
+                        <input type="text" id="filter-out-unicast-pkts" class="filter-input" placeholder="Filter Out Unicast Pkts" data-column-index="11">
+                        <input type="text" id="filter-last-change" class="filter-input" placeholder="Filter Last Change" data-column-index="12">
+                        <input type="text" id="filter-mtu" class="filter-input" placeholder="Filter MTU" data-column-index="13">
+                        <input type="text" id="filter-type" class="filter-input" placeholder="Filter Type" data-column-index="14">
+                    </div>
+
+                    <table class="interface-table">
+                        <thead>
+                            <tr>
+                                <th onclick="sortTable(0)">Interface <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(1)">Admin Status <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(2)">Oper Status <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(3)">Speed <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(4)">In Octets <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(5)">Out Octets <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(6)">In Discards <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(7)">In Errors <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(8)">In Unicast Pkts <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(9)">Out Discards <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(10)">Out Errors <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(11)">Out Unicast Pkts <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(12)">Last Change <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(13)">MTU <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i><div class="resizer"></div></th>
+                                <th onclick="sortTable(14)">Type <i class="fas fa-sort text-xs ml-1" data-sort-dir="none"></i></th>
+                            </tr>
+                        </thead>
+                        <tbody id="interfaceTableBody">
+                            <!-- Interface rows will be inserted here -->
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
-    </div>
-
-    <!-- Custom Message Box HTML -->
-    <div id="messageBox" class="message-box fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-gray-800 rounded-lg shadow-xl p-8 z-[1001] hidden flex-col items-center gap-4 text-gray-200 text-lg max-w-sm text-center">
-        <h3 id="messageBoxTitle" class="text-2xl font-bold text-blue-400 mb-2"></h3>
-        <p id="messageBoxContent" class="text-md mb-4"></p>
-        <button onclick="document.getElementById('messageBox').classList.remove('show')" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-6 rounded-lg cursor-pointer transition duration-200">OK</button>
     </div>
 
     <script>
-        // Base URL for API calls
-        const API_BASE_URL = '/api/v1';
+        const PROMETHEUS_URL = 'http://192.168.56.30:9090';
+        const WEBSOCKET_NOTIFIER_URL = 'http://127.0.0.1:8001/notify'; // Endpoint for WebSocket notifier
+        const REFRESH_INTERVAL_MS = 5 * 60 * 1000; // Auto-refresh every 5 minutes
+        const STALE_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes for stale data indication
 
-        // Function to toggle the dropdown menu visibility
-        function toggleMenu() {
-            const dropdown = document.getElementById('dropdown-menu');
-            dropdown.classList.toggle('hidden');
-        }
+        // Global cache to store last successful data for each switch
+        let switchDataCache = {};
+        let autoRefreshIntervalId; // To store the ID of the setInterval
 
-        // Custom Message Box function (replicated from index.html for self-containment)
-        function showMessageBox(title, message, isConfirm = false, onConfirmCallback = null) {
-            const msgBox = document.getElementById('messageBox');
-            const msgBoxTitle = document.getElementById('messageBoxTitle');
-            const msgBoxContent = document.getElementById('messageBoxContent');
-            const okButton = msgBox.querySelector('button');
-            let cancelButton = msgBox.querySelector('.cancel-button');
+        // Reference to modal elements
+        const interfaceDetailsModal = document.getElementById('interfaceDetailsModal');
+        const modalSwitchHostname = document.getElementById('modalSwitchHostname');
+        const modalLoading = document.getElementById('modalLoading');
+        const modalError = document.getElementById('modalError');
+        const interfaceTableContainer = document.getElementById('interfaceTableContainer');
+        const interfaceTableBody = document.getElementById('interfaceTableBody');
+        const refreshButton = document.getElementById('refreshButton');
 
-            msgBoxTitle.textContent = title;
-            msgBoxContent.textContent = message;
+        // Global variables for sorting
+        let currentSortColumn = -1;
+        let currentSortDirection = 'asc'; // 'asc' or 'desc'
 
-            okButton.textContent = 'OK';
-            okButton.onclick = () => {
-                msgBox.classList.remove('show');
-            };
-
-            if (cancelButton) {
-                cancelButton.remove();
-            }
-
-            if (isConfirm) {
-                okButton.onclick = () => {
-                    msgBox.classList.remove('show');
-                    if (onConfirmCallback) {
-                        onConfirmCallback();
-                    }
-                };
-
-                cancelButton = document.createElement('button');
-                cancelButton.textContent = 'Cancel';
-                cancelButton.className = 'cancel-button bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-6 rounded-lg cursor-pointer transition duration-200';
-                cancelButton.onclick = () => {
-                    msgBox.classList.remove('show');
-                };
-                okButton.parentNode.insertBefore(cancelButton, okButton.nextSibling);
-            }
-
-            msgBox.classList.add('show');
-            if (!isConfirm) {
-                setTimeout(() => {
-                    msgBox.classList.remove('show');
-                }, 3000);
-            }
-        }
-        window.showMessageBox = showMessageBox; // Make it globally accessible
+        // Variables for column resizing
+        let thElem;
+        let startX;
+        let startWidth;
 
         /**
-         * Fetches switch overview data from the backend API.
-         * @returns {Promise<Array>} A promise that resolves to an array of switch data objects.
+         * Sends a JSON message to the WebSocket notifier's HTTP endpoint.
+         * @param {Object} messageData - The JSON object to send.
          */
-        async function fetchSwitchOverviewData() {
-            document.getElementById('loading-indicator').classList.remove('hidden');
-            document.getElementById('error-message').classList.add('hidden');
-            document.getElementById('no-data-message').classList.add('hidden');
+        async function sendWebSocketNotification(messageData) {
             try {
-                const response = await fetch(`${API_BASE_URL}/get_switch_overview_data`);
+                const response = await fetch(WEBSOCKET_NOTIFIER_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(messageData),
+                });
+
                 if (!response.ok) {
                     const errorText = await response.text();
-                    console.error('Failed to fetch switch overview data:', response.status, errorText);
-                    document.getElementById('error-message').classList.remove('hidden');
-                    return [];
+                    console.error(`Failed to send WebSocket notification: ${response.status} - ${errorText}`);
+                } else {
+                    console.log('WebSocket notification sent successfully.');
                 }
-                const data = await response.json();
-                console.log('Fetched switch data:', data);
-                return data;
             } catch (error) {
-                console.error('Error fetching switch overview data:', error);
-                document.getElementById('error-message').classList.remove('hidden');
-                return [];
-            } finally {
-                document.getElementById('loading-indicator').classList.add('hidden');
+                console.error('Error sending WebSocket notification:', error);
             }
         }
 
         /**
-         * Renders the switch cards on the page.
-         * @param {Array} switchesData - An array of switch data objects.
+         * Closes the interface details modal.
          */
-        function renderSwitchCards(switchesData) {
-            const switchGrid = document.getElementById('switch-grid');
-            switchGrid.innerHTML = ''; // Clear existing cards
+        function closeModal() {
+            interfaceDetailsModal.classList.add('hidden');
+            resetFilters(); // Reset filters when closing modal
+        }
 
-            if (switchesData.length === 0) {
-                document.getElementById('no-data-message').classList.remove('hidden');
+        /**
+         * Resets all filter inputs in the interface details modal.
+         */
+        function resetFilters() {
+            document.querySelectorAll('#interfaceTableContainer .filter-input').forEach(input => {
+                if (input.type === 'text') {
+                    input.value = '';
+                } else if (input.tagName === 'SELECT') {
+                    input.value = ''; // Reset select to default "Filter..." option
+                }
+            });
+            // Ensure all rows are visible after resetting filters
+            const tableBody = document.getElementById('interfaceTableBody');
+            if (tableBody) {
+                Array.from(tableBody.rows).forEach(row => {
+                    row.style.display = '';
+                });
+            }
+
+            // Reset sort indicators
+            document.querySelectorAll('.interface-table th i').forEach(icon => {
+                icon.classList.remove('fa-sort-up', 'fa-sort-down');
+                icon.classList.add('fa-sort');
+                icon.dataset.sortDir = 'none';
+            });
+            currentSortColumn = -1;
+            currentSortDirection = 'asc';
+        }
+
+
+        /**
+         * Maps numerical status codes to human-readable strings and applies Tailwind CSS classes.
+         * @param {number} status - The numerical status (e.g., 1, 2, 3).
+         * @param {string} type - 'admin' or 'oper' to determine mapping.
+         * @returns {string} HTML string with styled status.
+         */
+        function getStatusHtml(status, type) {
+            let statusText = 'Unknown';
+            let statusClass = 'status-unknown';
+
+            if (type === 'admin') {
+                switch (status) {
+                    case 1: statusText = 'Up'; statusClass = 'status-up'; break;
+                    case 2: statusText = 'Down'; statusClass = 'status-down'; break;
+                    case 3: statusText = 'Testing'; statusClass = 'status-testing'; break;
+                }
+            } else if (type === 'oper') {
+                switch (status) {
+                    case 1: statusText = 'Up'; statusClass = 'status-up'; break;
+                    case 2: statusText = 'Down'; statusClass = 'status-down'; break;
+                    case 3: statusText = 'Testing'; statusClass = 'status-testing'; break;
+                    case 4: statusText = 'Unknown'; statusClass = 'status-unknown'; break;
+                    case 5: statusText = 'Dormant'; statusClass = 'status-dormant'; break;
+                    case 6: statusText = 'Not Present'; statusClass = 'status-notPresent'; break;
+                    case 7: statusText = 'Lower Layer Down'; statusClass = 'status-lowerLayerDown'; break;
+                }
+            }
+            return `<span class="${statusClass}">${statusText}</span>`;
+        }
+
+        /**
+         * Converts speed from bits per second to Mbps or Gbps.
+         * @param {number} speed - Speed in bits per second.
+         * @returns {string} Formatted speed string.
+         */
+        function formatSpeed(speed) {
+            if (speed === 'N/A' || isNaN(speed)) return 'N/A';
+            if (speed === 0) return '0 bps'; // Handle 0 speed explicitly
+            if (speed >= 1_000_000_000) {
+                return `${(speed / 1_000_000_000).toFixed(2)} Gbps`;
+            } else if (speed >= 1_000_000) {
+                return `${(speed / 1_000_000).toFixed(2)} Mbps`;
+            } else if (speed >= 1_000) {
+                return `${(speed / 1_000).toFixed(2)} Kbps`;
+            }
+            return `${speed} bps`;
+        }
+
+        /**
+         * Formats byte counts into human-readable units (Bytes, KB, MB, GB, TB).
+         * @param {number} bytes - The number of bytes.
+         * @returns {string} Formatted byte string.
+         */
+        function formatBytes(bytes) {
+            if (bytes === 'N/A' || isNaN(bytes)) return 'N/A';
+            if (bytes === 0) return '0 Bytes';
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = parseInt(Math.floor(Math.log(bytes) / Math.log(1024)));
+            return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${sizes[i]}`;
+        }
+
+        /**
+         * Formats large numbers (like packet counts) into human-readable units (K, M, B, T).
+         * @param {number} count - The number to format.
+         * @returns {string} Formatted count string.
+         */
+        function formatCounts(count) {
+            if (count === 'N/A' || isNaN(count)) return 'N/A';
+            if (count === 0) return '0';
+            const suffixes = ['', 'K', 'M', 'B', 'T']; // K for thousand, M for million, B for billion, T for trillion
+            const i = parseInt(Math.floor(Math.log(count) / Math.log(1000)));
+            return `${(count / Math.pow(1000, i)).toFixed(1)}${suffixes[i]}`;
+        }
+
+        /**
+         * Formats Prometheus timestamp (seconds since epoch) into a readable date string.
+         * @param {number} timestamp - Prometheus timestamp.
+         * @returns {string} Formatted date string.
+         */
+        function formatTimestamp(timestamp) {
+            if (timestamp === 'N/A' || isNaN(timestamp)) return 'N/A';
+            const date = new Date(timestamp * 1000); // Convert seconds to milliseconds
+            return date.toLocaleString(); // Use locale-specific date and time format
+        }
+
+        /**
+         * Performs a query against the Prometheus API.
+         * @param {string} query - The PromQL query.
+         * @returns {Promise<Object>} - The JSON response from Prometheus.
+         */
+        async function queryPrometheus(query) {
+            const encodedQuery = encodeURIComponent(query);
+            const url = `${PROMETHEUS_URL}/api/v1/query?query=${encodedQuery}`;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    const errorBody = await response.text();
+                    throw new Error(`Prometheus HTTP error: ${response.status} - ${errorBody}`);
+                }
+                return await response.json();
+            }
+            catch (error) {
+                console.error(`Error querying Prometheus for query "${query}":`, error);
+                // Differentiate between network/CORS errors and other errors
+                if (error instanceof TypeError) {
+                    // This typically means network error, connection refused, or CORS issue
+                    throw new Error(`Network/CORS error: Could not reach Prometheus at ${PROMETHEUS_URL}. Please check connectivity and CORS settings. Original error: ${error.message}`);
+                }
+                throw error; // Re-throw other types of errors
+            }
+        }
+
+        /**
+         * Extracts a single value from a Prometheus query result, falling back to cached value if new data is unavailable.
+         * @param {Object} newData - The new result from a Prometheus query.
+         * @param {string} cacheKey - The key to look up in the cached data.
+         * @param {Object} cachedData - The previously cached data for the switch.
+         * @param {string|number} defaultValue - The default value if no data is available.
+         * @returns {string|number} - The extracted value or 'N/A'.
+         */
+        function getValue(newData, cacheKey, cachedData, defaultValue = 'N/A') {
+            if (newData && newData.status === 'success' && newData.data.result.length > 0) {
+                const value = parseFloat(newData.data.result[0].value[1]);
+                return isNaN(value) ? defaultValue : value;
+            }
+            // Fallback to cached value if new data is not successful or empty
+            if (cachedData && cachedData[cacheKey] !== undefined) {
+                console.log(`Using cached value for ${cacheKey}:`, cachedData[cacheKey]);
+                return cachedData[cacheKey];
+            }
+            return defaultValue;
+        }
+
+        /**
+         * Fetches all necessary data for a single switch and renders its card.
+         * @param {Object} switchConfig - The configuration object for the switch.
+         * It now expects { hostname: string, switch_ip: string }
+         */
+        async function processSwitch(switchConfig) {
+            const hostname = switchConfig.hostname;
+            const ip = switchConfig.switch_ip; // This is now the agent_host (switch IP)
+            if (!hostname || !ip) {
+                console.warn("Skipping switch due to missing hostname or IP:", switchConfig);
                 return;
             }
 
-            switchesData.forEach(switchInfo => {
-                const card = document.createElement('div');
-                card.className = 'switch-card';
+            console.log(`Processing switch: ${hostname} (IP: ${ip})`);
+            const cachedSwitchData = switchDataCache[hostname] || {}; // Get last cached data for this switch
 
-                const { switch_ip, hostname, model, cpu_utilization, memory_utilization, overall_interface_status, problem_interfaces, interfaces } = switchInfo;
+            // Define all queries, using 'hostname' for metrics that have it, and 'agent_host' (ip) for interfaces
+            const uptimeQuery = `cisco_snmp_uptime{hostname="${hostname}"} / (60*60*24)`;
+            const cpuQuery = `cisco_snmp_cpu_5min{hostname="${hostname}"}`;
+            const memUsedQuery = `cisco_snmp_mem_used{hostname="${hostname}"}`;
+            const memFreeQuery = `cisco_snmp_mem_free{hostname="${hostname}"}`;
+            
+            // Modified downInterfacesQuery to filter by agent_host (switch IP)
+            const downInterfacesQuery = `label_replace(
+                (
+                    interfaces_ifAdminStatus{agent_host="${ip}",job="telegraf_snmp"} == 1
+                    and
+                    interfaces_ifOperStatus{agent_host="${ip}",job="telegraf_snmp"} == 2
+                )
+                * on (ifIndex, agent_host)
+                group_left(ifType)
+                interfaces_ifType{job="telegraf_snmp"},
+                "status", "AdminUp_OperDown", "", ""
+            )`;
 
-                // Determine hostname color class based on model
-                let hostnameColorClass = '';
-                if (model && model.toLowerCase() === 'nexus') {
-                    hostnameColorClass = 'hostname-nexus';
-                } else if (model && model.toLowerCase() === 'cisco') {
-                    hostnameColorClass = 'hostname-cisco';
+            // Fetch all data in parallel
+            const [uptimeData, cpuData, memUsedData, memFreeData, downInterfacesData] = await Promise.all([
+                queryPrometheus(uptimeQuery),
+                queryPrometheus(cpuQuery),
+                queryPrometheus(memUsedQuery),
+                queryPrometheus(memFreeQuery),
+                queryPrometheus(downInterfacesQuery)
+            ]);
+
+            // Process results, using cached values on failure or 'N/A' if no cached value
+            const uptime = getValue(uptimeData, 'uptime', cachedSwitchData);
+            const cpu = getValue(cpuData, 'cpu', cachedSwitchData);
+            const memUsed = getValue(memUsedData, 'memUsed', cachedSwitchData); // Store raw for calculation
+            const memFree = getValue(memFreeData, 'memFree', cachedSwitchData); // Store raw for calculation
+            
+            let memoryUtilization = 'N/A';
+            if (memUsed !== 'N/A' && memFree !== 'N/A' && (memUsed + memFree) > 0) {
+                memoryUtilization = (memUsed / (memUsed + memFree)) * 100;
+            } else if (cachedSwitchData.memory !== undefined) {
+                memoryUtilization = cachedSwitchData.memory; // Fallback for calculated memory
+            }
+            
+            let interfaceStatus = 'OK'; // Default for main display
+            let downInterfacesList = []; // This list is only for the hover pop-up
+
+            console.log(`Down interfaces raw Prometheus data for ${hostname}:`, downInterfacesData); // Keep this log for debugging
+
+            if (downInterfacesData && downInterfacesData.status === 'success') {
+                if (downInterfacesData.data.result.length > 0) {
+                    interfaceStatus = 'Problem'; 
+                    downInterfacesList = downInterfacesData.data.result.map(item => {
+                        const metric = item.metric;
+                        console.log(`Down interface detected for ${hostname}:`, metric); // Log raw metric for debugging
+                        return {
+                            name: metric.ifDescr || metric.ifAlias || metric.ifType || 'Unknown Interface', // Prioritize ifDescr, then ifAlias, then ifType
+                            agent_host: metric.agent_host || 'N/A',
+                            ifIndex: metric.ifIndex || 'N/A',
+                            ifDescr: metric.ifDescr || 'N/A', // Store for detailed name display
+                            ifAlias: metric.ifAlias || 'N/A', // Store for detailed name display
+                            ifType: metric.ifType || 'N/A' // Store for detailed name display
+                        };
+                    });
+                } else {
+                    interfaceStatus = 'OK';
+                    downInterfacesList = [];
+                    console.log(`Prometheus query for down interfaces returned no results for ${hostname}. Status OK.`);
+                }
+            } else {
+                console.error(`Failed to get down interfaces data for ${hostname}. Retaining previous status.`);
+                if (cachedSwitchData.interfaceStatus === 'Problem') {
+                    interfaceStatus = 'Problem';
+                    downInterfacesList = cachedSwitchData.downInterfaces || [];
+                }
+            }
+
+            const currentSwitchData = {
+                hostname: hostname,
+                ip: ip, // Use the IP discovered from Prometheus (agent_host)
+                uptime: uptime,
+                cpu: cpu,
+                memory: memoryUtilization,
+                interfaceStatus: interfaceStatus, // This now reflects if there *are* problems
+                downInterfaces: downInterfacesList,
+                // Store raw mem values for next calculation if needed
+                memUsed: memUsed,
+                memFree: memFree,
+                lastUpdated: Date.now() // Update timestamp when data is successfully processed
+            };
+
+            switchDataCache[hostname] = currentSwitchData; // Update cache with the latest processed data
+            renderSwitchCard(currentSwitchData);
+        }
+
+        /**
+         * Renders or updates a single switch card to the grid.
+         * @param {Object} data - The processed data for a single switch.
+         */
+        function renderSwitchCard(data) {
+            const grid = document.getElementById('switch-grid');
+            let card = document.getElementById(`switch-card-${data.hostname}`);
+
+            // Create card if it doesn't exist
+            if (!card) {
+                card = document.createElement('div');
+                card.id = `switch-card-${data.hostname}`; // Assign an ID for easy lookup
+                card.className = 'switch-card'; // Base class
+                grid.appendChild(card);
+            }
+
+            // Set data attributes for click handler
+            card.setAttribute('data-hostname', data.hostname);
+            card.setAttribute('data-ip', data.ip);
+            card.onclick = () => showInterfaceDetails(data.hostname, data.ip); // Attach click handler
+
+            // Apply/remove stale status based on last update time
+            // Also apply green/red border based on interfaceStatus
+            card.classList.remove('border-status-ok', 'border-status-problem', 'status-stale', 'ok-border', 'problem-border'); // Remove previous status borders and stale class
+            if (data.lastUpdated && (Date.now() - data.lastUpdated > STALE_THRESHOLD_MS)) {
+                card.classList.add('status-stale'); // Apply grayscale/opacity effect
+            } else if (data.interfaceStatus === 'OK') {
+                card.classList.add('ok-border'); // Apply green border
+            } else if (data.interfaceStatus === 'Problem') {
+                card.classList.add('problem-border'); // Apply red border
+            } else {
+                card.classList.add('status-stale'); // Default to stale if status is unknown/N/A
+            }
+
+            const uptimeText = data.uptime !== 'N/A' ? `${data.uptime.toFixed(2)} days` : 'N/A';
+            const cpuText = data.cpu !== 'N/A' ? `${data.cpu.toFixed(2)}%` : 'N/A';
+            const memoryText = data.memory !== 'N/A' ? `${data.memory.toFixed(2)}%` : 'N/A';
+
+            // Always include the hover-details div, its content is conditional
+            const hoverDetailsContent = data.interfaceStatus === 'Problem' && data.downInterfaces.length > 0 ? `
+                <h4 class="font-bold text-white mb-2">Down Interfaces</h4>
+                <ul class="interface-list text-sm text-red-400">
+                    ${data.downInterfaces.map(iface => {
+                        const interfaceDisplayName = (iface.ifAlias && iface.ifAlias !== 'N/A' && iface.ifAlias !== iface.ifDescr) 
+                            ? `${iface.ifAlias} (${iface.ifDescr !== 'N/A' ? iface.ifDescr : 'N/A'})`
+                            : (iface.ifDescr !== 'N/A' ? iface.ifDescr : iface.ifType);
+                        return `<li>${interfaceDisplayName}</li>`;
+                    }).join('')}
+                </ul>
+            ` : `
+                <h4 class="font-bold text-white mb-2">Interface Status</h4>
+                <p class="text-gray-400 text-sm">No down interfaces detected.</p>
+            `;
+
+            card.innerHTML = `
+                <div>
+                    <h3 class="text-xl font-bold truncate">${data.hostname}</h3>
+                    <p class="text-sm text-gray-400">${data.ip}</p>
+                </div>
+                <div class="mt-4 space-y-2">
+                    <p><i class="fas fa-clock w-5 text-gray-400"></i> Uptime: <span class="font-semibold">${uptimeText}</span></p>
+                    <p><i class="fas fa-microchip w-5 text-gray-400"></i> CPU: <span class="font-semibold">${cpuText}</span></p>
+                    <p><i class="fas fa-memory w-5 text-gray-400"></i> Memory: <span class="font-semibold">${memoryText}</span></p>
+                    <p><i class="fas fa-network-wired w-5 text-gray-400"></i> Interfaces: 
+                        <span class="font-semibold ${data.interfaceStatus === 'OK' ? 'status-ok' : 'status-problem'}">${data.interfaceStatus}</span>
+                    </p>
+                </div>
+                <div class="hover-details">
+                    ${hoverDetailsContent}
+                </div>
+            `;
+            
+            // Remove loading indicator if it's the first card being added
+            const loadingIndicator = document.getElementById('loading-indicator');
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'none';
+            }
+        }
+
+        /**
+         * Sorts the interface table by the specified column.
+         * @param {number} columnIndex - The index of the column to sort by.
+         */
+        function sortTable(columnIndex) {
+            const table = document.getElementById('interfaceTableBody');
+            const rows = Array.from(table.rows);
+            // Updated Indices for numeric columns: Speed(3), In Octets(4), Out Octets(5), In Discards(6), In Errors(7), In Unicast Pkts(8), Out Discards(9), Out Errors(10), Out Unicast Pkts(11), MTU(13)
+            const isNumericColumn = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13].includes(columnIndex);
+            const isDateColumn = columnIndex === 12; // Last Change
+
+            // Determine sort direction
+            if (currentSortColumn === columnIndex) {
+                currentSortDirection = (currentSortDirection === 'asc') ? 'desc' : 'asc';
+            } else {
+                currentSortColumn = columnIndex;
+                currentSortDirection = 'asc'; // Default to ascending for a new column
+            }
+
+            // Sort rows
+            rows.sort((rowA, rowB) => {
+                let cellA = rowA.cells[columnIndex].textContent.trim();
+                let cellB = rowB.cells[columnIndex].textContent.trim();
+
+                let comparison = 0;
+
+                if (isNumericColumn) {
+                    // Remove non-numeric characters and parse as float
+                    cellA = parseFloat(cellA.replace(/[^0-9.]/g, '')) || 0;
+                    cellB = parseFloat(cellB.replace(/[^0-9.]/g, '')) || 0;
+                    comparison = cellA - cellB;
+                } else if (isDateColumn) {
+                    // Parse dates
+                    const dateA = new Date(cellA).getTime();
+                    const dateB = new Date(cellB).getTime();
+                    comparison = dateA - dateB;
+                } else {
+                    // String comparison (case-insensitive)
+                    comparison = cellA.localeCompare(cellB, undefined, { sensitivity: 'base' });
                 }
 
+                return currentSortDirection === 'asc' ? comparison : -comparison;
+            });
 
-                // Basic details display
-                let interfaceStatusClass = 'status-unknown';
-                if (overall_interface_status === 'OK') {
-                    interfaceStatusClass = 'status-ok';
-                } else if (overall_interface_status === 'Problem') {
-                    interfaceStatusClass = 'status-problem';
+            // Clear existing rows and append sorted ones
+            while (table.firstChild) {
+                table.removeChild(table.firstChild);
+            }
+            rows.forEach(row => table.appendChild(row));
+
+            // Update sort icons
+            document.querySelectorAll('.interface-table th i').forEach(icon => {
+                icon.classList.remove('fa-sort-up', 'fa-sort-down');
+                icon.classList.add('fa-sort');
+                icon.dataset.sortDir = 'none';
+            });
+
+            const currentIcon = document.querySelectorAll('.interface-table th i')[columnIndex];
+            if (currentIcon) {
+                currentIcon.classList.remove('fa-sort');
+                currentIcon.classList.add(currentSortDirection === 'asc' ? 'fa-sort-up' : 'fa-sort-down');
+                currentIcon.dataset.sortDir = currentSortDirection;
+            }
+        }
+
+        /**
+         * Filters the interface table based on input values.
+         */
+        function filterTable() {
+            const tableBody = document.getElementById('interfaceTableBody');
+            const rows = tableBody.rows;
+
+            // Get filter values from inputs
+            const filterValues = {};
+            document.querySelectorAll('#interfaceTableContainer .filter-input').forEach(input => {
+                const columnIndex = input.dataset.columnIndex;
+                filterValues[columnIndex] = input.value.toLowerCase();
+            });
+
+            for (let i = 0; i < rows.length; i++) {
+                const row = rows[i];
+                const cells = row.cells;
+                let rowMatchesFilters = true;
+
+                for (const colIndex in filterValues) {
+                    const filterText = filterValues[colIndex];
+                    if (filterText) {
+                        const cellText = cells[colIndex].textContent.toLowerCase();
+                        if (!cellText.includes(filterText)) {
+                            rowMatchesFilters = false;
+                            break;
+                        }
+                    }
                 }
 
-                // Display problematic interfaces directly on the card if any
-                let problemInterfacesHtml = '';
-                if (problem_interfaces && problem_interfaces.length > 0) {
-                    // Limiting to first 3 problem interfaces to keep the card small
-                    const displayProblems = problem_interfaces.slice(0, 3);
-                    const moreProblems = problem_interfaces.length > 3 ? ` (+${problem_interfaces.length - 3} more)` : '';
-                    problemInterfacesHtml = `
-                        <p class="text-red-400 font-semibold text-xs mt-1">
-                            <i class="fas fa-exclamation-triangle mr-1"></i> Interfaces Down: ${displayProblems.join(', ')}${moreProblems}
-                        </p>
-                    `;
+                if (rowMatchesFilters) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
                 }
+            }
+        }
 
-                card.innerHTML = `
-                    <div class="switch-header">
-                        <h3 class="${hostnameColorClass}">${hostname || 'N/A'}</h3>
-                        </div>
-                    <div class="switch-details">
-                        <p><strong>IP:</strong> ${switch_ip || 'N/A'}</p>
-                        <p><strong>CPU:</strong> ${cpu_utilization !== "N/A" ? cpu_utilization.toFixed(2) + '%' : 'N/A'}</p>
-                        <p><strong>Memory:</strong> ${memory_utilization !== "N/A" ? memory_utilization.toFixed(2) + '%' : 'N/A'}</p>
-                        <span class="status-badge ${interfaceStatusClass}">Interfaces: ${overall_interface_status}</span>
-                        ${problemInterfacesHtml}
-                    </div>
-                    <div class="hover-details-overlay">
-                        <h4>Interface Details for ${hostname || 'N/A'}</h4>
-                        <ul class="interface-list">
-                            ${interfaces && interfaces.length > 0 ?
-                                interfaces.map(iface => `
-                                    <li>
-                                        <span><strong>${iface.name || 'N/A'}:</strong> ${iface.alias || 'No Alias'}</span>
-                                        <span class="${iface.admin_status === 'up' && iface.oper_status === 'down' ? 'interface-status-down' : 'interface-status-ok'}">
-                                            Adm: ${iface.admin_status || 'N/A'}, Oper: ${iface.oper_status || 'N/A'}
-                                        </span>
-                                    </li>
-                                `).join('')
-                                : '<p class="text-gray-400 text-sm">No interface data available.</p>'
+        /**
+         * Displays the interface details modal for a given switch.
+         * @param {string} hostname - The hostname of the switch.
+         * @param {string} ip - The IP address (agent_host) of the switch.
+         */
+        async function showInterfaceDetails(hostname, ip) {
+            modalSwitchHostname.textContent = `Interfaces for ${hostname} (${ip})`;
+            interfaceDetailsModal.classList.remove('hidden'); // Show modal
+
+            modalLoading.classList.remove('hidden'); // Show loading
+            modalError.classList.add('hidden');    // Hide error
+            interfaceTableContainer.classList.add('hidden'); // Hide table
+            interfaceTableBody.innerHTML = ''; // Clear previous data
+
+            resetFilters(); // Reset filters and sort indicators when opening modal
+
+            const metricsToFetch = [
+                'interfaces_ifAdminStatus', 'interfaces_ifInDiscards', 'interfaces_ifInErrors',
+                'interfaces_ifInOctets', 'interfaces_ifInUcastPkts', 'interfaces_ifInUnknownProtos',
+                'interfaces_ifLastChange', 'interfaces_ifMtu', 'interfaces_ifOperStatus',
+                'interfaces_ifOutDiscards', 'interfaces_ifOutErrors', 'interfaces_ifOutOctets',
+                'interfaces_ifOutUcastPkts', 'interfaces_ifSpeed', 'interfaces_ifType',
+                'interfaces_ifDescr', 'interfaces_ifAlias' // Also fetch descriptive labels
+            ];
+
+            const queries = metricsToFetch.map(metric => 
+                `${metric}{agent_host="${ip}",job="telegraf_snmp"}`
+            );
+
+            try {
+                const results = await Promise.all(queries.map(queryPrometheus));
+                const interfaceMap = new Map(); // Key: `${agent_host}-${ifIndex}`
+
+                results.forEach((promResult, index) => {
+                    if (promResult && promResult.status === 'success' && promResult.data.result.length > 0) {
+                        const metricName = metricsToFetch[index];
+                        promResult.data.result.forEach(item => {
+                            const metric = item.metric;
+                            const value = item.value[1];
+                            const key = `${metric.agent_host}-${metric.ifIndex}`;
+
+                            if (!interfaceMap.has(key)) {
+                                interfaceMap.set(key, {
+                                    ifIndex: metric.ifIndex,
+                                    agent_host: metric.agent_host,
+                                    ifDescr: metric.ifDescr || 'N/A',
+                                    ifAlias: metric.ifAlias || 'N/A',
+                                    ifType: metric.ifType || 'N/A',
+                                    ifAdminStatus: 'N/A',
+                                    ifOperStatus: 'N/A',
+                                    ifSpeed: 'N/A',
+                                    ifInDiscards: 'N/A',
+                                    ifInErrors: 'N/A',
+                                    ifInOctets: 'N/A',
+                                    ifInUcastPkts: 'N/A',
+                                    ifInUnknownProtos: 'N/A',
+                                    ifLastChange: 'N/A',
+                                    ifMtu: 'N/A',
+                                    ifOperStatus: 'N/A',
+                                    ifOutDiscards: 'N/A',
+                                    ifOutErrors: 'N/A',
+                                    ifOutOctets: 'N/A',
+                                    ifOutUcastPkts: 'N/A'
+                                });
                             }
-                        </ul>
-                    </div>
-                `;
-                switchGrid.appendChild(card);
+                            const interfaceData = interfaceMap.get(key);
+                            // Assign value based on metric name
+                            // For labels like ifDescr, ifAlias, ifType, prioritize the Prometheus label if it exists
+                            if (metricName === 'interfaces_ifDescr' && metric.ifDescr) interfaceData.ifDescr = metric.ifDescr;
+                            else if (metricName === 'interfaces_ifAlias' && metric.ifAlias) interfaceData.ifAlias = metric.ifAlias;
+                            else if (metricName === 'interfaces_ifType' && metric.ifType) interfaceData.ifType = metric.ifType;
+                            else if (metricName.startsWith('interfaces_if')) {
+                                // For actual values, parse float
+                                interfaceData[metricName.replace('interfaces_', '')] = parseFloat(value);
+                            }
+                        });
+                    }
+                });
+
+                const interfaces = Array.from(interfaceMap.values()).sort((a, b) => {
+                    // Sort by ifIndex numerically
+                    return parseInt(a.ifIndex) - parseInt(b.ifIndex);
+                });
+
+                if (interfaces.length > 0) {
+                    interfaces.forEach(iface => {
+                        const row = interfaceTableBody.insertRow();
+                        // Logic for interface name: Alias (Description) or Description or Type
+                        const interfaceName = (iface.ifAlias && iface.ifAlias !== 'N/A' && iface.ifAlias !== iface.ifDescr) 
+                            ? `${iface.ifAlias} (${iface.ifDescr !== 'N/A' ? iface.ifDescr : 'N/A'})`
+                            : (iface.ifDescr !== 'N/A' ? iface.ifDescr : iface.ifType);
+
+                        row.innerHTML = `
+                            <td>${interfaceName} (Index: ${iface.ifIndex})</td>
+                            <td>${getStatusHtml(iface.ifAdminStatus, 'admin')}</td>
+                            <td>${getStatusHtml(iface.ifOperStatus, 'oper')}</td>
+                            <td>${formatSpeed(iface.ifSpeed)}</td>
+                            <td>${formatBytes(iface.ifInOctets)}</td>
+                            <td>${formatBytes(iface.ifOutOctets)}</td>
+                            <td>${formatCounts(iface.ifInDiscards)}</td>
+                            <td>${formatCounts(iface.ifInErrors)}</td>
+                            <td>${formatCounts(iface.ifInUcastPkts)}</td>
+                            <td>${formatCounts(iface.ifOutDiscards)}</td>
+                            <td>${formatCounts(iface.ifOutErrors)}</td>
+                            <td>${formatCounts(iface.ifOutUcastPkts)}</td>
+                            <td>${formatTimestamp(iface.ifLastChange)}</td>
+                            <td>${iface.ifMtu.toLocaleString()}</td>
+                            <td>${iface.ifType}</td>
+                        `;
+                    });
+                    modalLoading.classList.add('hidden');
+                    interfaceTableContainer.classList.remove('hidden');
+
+                    // Attach event listeners for filters after table is populated
+                    document.querySelectorAll('#interfaceTableContainer .filter-input').forEach(input => {
+                        input.addEventListener('keyup', filterTable);
+                        input.addEventListener('change', filterTable); // For select inputs
+                    });
+
+                    // Initialize resizers after table is populated
+                    initializeResizers();
+
+                } else {
+                    modalLoading.classList.add('hidden');
+                    modalError.classList.remove('hidden');
+                    modalError.innerHTML = `<p class="text-gray-400">No interface data found for this switch.</p>`;
+                    // Send WebSocket notification for no interface data
+                    sendWebSocketNotification({
+                        frontend_block_id: "G.CISCOSW",
+                        message: `No interface data found for switch ${hostname} (${ip}).`,
+                        severity: "WARNING",
+                        status: "NO_DATA",
+                        timestamp: new Date().toISOString(),
+                        type: "FRONTEND_WARNING"
+                    });
+                }
+
+            } catch (error) {
+                console.error("Error fetching interface details:", error);
+                modalLoading.classList.add('hidden');
+                modalError.classList.remove('hidden');
+                modalError.innerHTML = `<p class="text-red-400">Error loading interface details: ${error.message}</p>`;
+                // Send WebSocket notification for error loading interface details
+                sendWebSocketNotification({
+                    frontend_block_id: "G.CISCOSW",
+                    message: `Failed to load interface details for switch ${hostname} (${ip}): ${error.message}`,
+                    severity: "ERROR",
+                    status: "ERROR",
+                    timestamp: new Date().toISOString(),
+                    type: "FRONTEND_ERROR"
+                });
+            }
+        }
+
+        /**
+         * Initializes column resizers for the interface table.
+         */
+        function initializeResizers() {
+            const headers = document.querySelectorAll('.interface-table th');
+            headers.forEach((header, index) => {
+                // Don't add a resizer to the last column
+                if (index < headers.length - 1) {
+                    const resizer = header.querySelector('.resizer');
+                    if (resizer) {
+                        resizer.addEventListener('mousedown', (e) => {
+                            thElem = header;
+                            startX = e.clientX;
+                            startWidth = thElem.offsetWidth;
+                            document.body.classList.add('resizing');
+                            document.addEventListener('mousemove', doMouseMove);
+                            document.addEventListener('mouseup', doMouseUp);
+                        });
+                    }
+                }
             });
         }
 
         /**
-         * Initializes the Switch Overview page.
+         * Handles mousemove event for column resizing.
+         * @param {MouseEvent} e - The mouse event.
          */
-        async function initializeSwitchOverview() {
-            const switchesData = await fetchSwitchOverviewData();
-            renderSwitchCards(switchesData);
+        function doMouseMove(e) {
+            if (thElem) {
+                const diffX = e.clientX - startX;
+                const newWidth = startWidth + diffX;
+                // Allow minimum width of 80px to prevent columns from collapsing too much
+                thElem.style.width = `${Math.max(80, newWidth)}px`;
+                thElem.style.minWidth = `${Math.max(80, newWidth)}px`; 
+            }
         }
 
-        // Initialize on window load
-        window.onload = initializeSwitchOverview;
+        /**
+         * Handles mouseup event to stop column resizing.
+         */
+        function doMouseUp() {
+            thElem = undefined;
+            document.body.classList.remove('resizing');
+            document.removeEventListener('mousemove', doMouseMove);
+            document.removeEventListener('mouseup', doMouseUp);
+        }
+
+        /**
+         * Main function to initialize and refresh the dashboard.
+         */
+        async function initializeDashboard() {
+            // Clear existing cards before re-rendering to ensure a fresh state on each refresh
+            const grid = document.getElementById('switch-grid');
+            grid.innerHTML = `
+                <div id="loading-indicator" class="col-span-full text-center py-12">
+                    <i class="fas fa-spinner fa-spin text-4xl text-gray-400"></i>
+                    <p class="mt-2 text-gray-400">Loading switch data from Prometheus...</p>
+                </div>
+            `;
+
+            let switches = [];
+
+            try {
+                // Discover switches based on cisco_snmp_cpu_5min, which should have both hostname and agent_host
+                const cpuMetrics = await queryPrometheus('cisco_snmp_cpu_5min{job="telegraf_snmp"}');
+                
+                if (cpuMetrics.status === 'success' && cpuMetrics.data.result.length > 0) {
+                    const uniqueSwitches = new Map(); // Use a Map to store unique hostnames
+                    cpuMetrics.data.result.forEach(item => {
+                        const hostname = item.metric.hostname; // Actual switch hostname
+                        const agent_host = item.metric.agent_host; // Actual switch IP
+
+                        if (hostname && agent_host && !uniqueSwitches.has(hostname)) {
+                            uniqueSwitches.set(hostname, { hostname: hostname, switch_ip: agent_host });
+                        }
+                    });
+                    switches = Array.from(uniqueSwitches.values());
+                    console.log("Discovered switches from Prometheus based on CPU metrics:", switches);
+                } else {
+                    // Prometheus was accessible, but no data for the query
+                    console.warn("No switch CPU data found in Prometheus for the query 'cisco_snmp_cpu_5min{job=\"telegraf_snmp\"}'. Check Prometheus targets and metric names.");
+                    grid.innerHTML = `<div class="col-span-full text-center py-12 text-gray-400">
+                        <p>No switches found in Prometheus for the specified query.</p>
+                        <p>Ensure your Telegraf SNMP agent is correctly configured and sending <code>cisco_snmp_cpu_5min</code> metrics to Prometheus.</p>
+                    </div>`;
+                    // Send WebSocket notification for no switch data
+                    sendWebSocketNotification({
+                        frontend_block_id: "G.CISCOSW",
+                        message: "No switch CPU data found in Prometheus. Check Telegraf/Prometheus configuration.",
+                        severity: "WARNING",
+                        status: "NO_DATA",
+                        timestamp: new Date().toISOString(),
+                        type: "FRONTEND_WARNING"
+                    });
+                    return; // Stop execution if no data is found
+                }
+            } catch (error) {
+                // This catch block handles errors thrown by queryPrometheus (network/CORS or HTTP errors)
+                console.error("Failed to discover switches from Prometheus:", error);
+                grid.innerHTML = `<div class="col-span-full text-center py-12 text-red-400">
+                    <p><strong>Error: ${error.message}</strong></p>
+                    <p>Please ensure Prometheus is running at <code>${PROMETHEUS_URL}</code> and is accessible from your browser.</p>
+                    <p>If you see a "Cross-Origin Request Blocked" or "CORS" error in your browser console, you need to configure Prometheus or a proxy to allow requests from this page's origin.</p>
+                </div>`;
+                // Send WebSocket notification for Prometheus discovery error
+                sendWebSocketNotification({
+                    frontend_block_id: "G.CISCOSW",
+                    message: `Failed to load interface details for switch ${hostname} (${ip}): ${error.message}`,
+                    severity: "CRITICAL",
+                    status: "ERROR",
+                    timestamp: new Date().toISOString(),
+                    type: "FRONTEND_ERROR"
+                });
+                return;
+            }
+
+            if (switches.length === 0) {
+                 grid.innerHTML = `<div class="col-span-full text-center py-12 text-gray-400">No switches found in Prometheus.</div>`;
+                 return;
+            }
+
+            // Create a processing task for each discovered switch
+            const processingTasks = switches.map(sw => processSwitch(sw));
+            
+            // Wait for all switches to be processed
+            await Promise.all(processingTasks);
+        }
+
+        // Event listener for Esc key to close modal
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !interfaceDetailsModal.classList.contains('hidden')) {
+                closeModal();
+            }
+        });
+
+        // Manual refresh button click listener
+        refreshButton.addEventListener('click', initializeDashboard);
+
+        // Run the initialization on page load and then every REFRESH_INTERVAL_MS
+        window.onload = () => {
+            initializeDashboard(); // Initial load
+            // Clear any existing interval before setting a new one
+            if (autoRefreshIntervalId) {
+                clearInterval(autoRefreshIntervalId);
+            }
+            autoRefreshIntervalId = setInterval(initializeDashboard, REFRESH_INTERVAL_MS); // Set up polling for continuous updates
+        };
     </script>
 </body>
 </html>
