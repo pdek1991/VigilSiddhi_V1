@@ -1,7 +1,3 @@
-Here is an updated **README.md** for your repository, reflecting your requirements and suggestions—including clear explanations of NMS/IT/OT, and a future improvement for PWA-based push notifications.
-
----
-
 # VigilSiddhi_V1
 
 **VigilSiddhi** is an extensible, multi-agent, real-time monitoring and alarm management system for broadcast, network, and IT infrastructure. It supports modern architectures with SNMP, Windows, iLO, IRD, Switch, and custom health checks, providing unified dashboards, alarm consoles, and history analytics. The backend is powered by Python (Flask), Elasticsearch, MySQL, Redis Streams, WebSockets, and push notifications.
@@ -300,7 +296,3 @@ For queries, enhancements, or support, please open an issue or contact the maint
 ---
 
 **For more, see the full codebase:** [VigilSiddhi_V1 on GitHub](https://github.com/pdek1991/VigilSiddhi_V1)
-
----
-
-Let me know if you want any further customization or if you want this in a downloadable format!
