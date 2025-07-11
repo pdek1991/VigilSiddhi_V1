@@ -1,260 +1,306 @@
-VigilSiddhi Dashboard
-VigilSiddhi is a comprehensive monitoring and dashboard application designed to provide real-time status and alarm monitoring for various IT infrastructure components, including Cisco D9800 IRD devices, Windows hosts, and HPE iLO servers. It leverages Elasticsearch for data storage, a Flask backend for API exposure, and a modern web frontend for visualization.
+Here is an updated **README.md** for your repository, reflecting your requirements and suggestions—including clear explanations of NMS/IT/OT, and a future improvement for PWA-based push notifications.
 
-##Features
-Cisco D9800 IRD Monitoring:
-Fetches RF data (C/N Margin, Signal Level, Input Rate) and channel names from configured IRD devices.
-Generates and logs alarms based on IRD status and critical metrics.
-Stores IRD trend data and alarms in Elasticsearch for historical analysis and real-time display.
-Windows Host Monitoring:
-Monitors Windows hosts by checking the status of specified services and processes via SSH and PowerShell commands.
-Collects system information, disk usage, and network statistics.
-Generates issues (alarms) based on predefined thresholds or service/process states.
-Stores Windows host trend data and alarms in Elasticsearch.
-HPE iLO Monitoring:
-Fetches active Integrated Lights-Out (iLO) Management Log (IML) alarms.
-Provides collective status and alarms for groups of iLO devices (e.g., "iLO M", "iLO P", "iLO B").
-Includes a robust retry mechanism for network requests.
-Centralized Configuration Management:
-Loads initial configurations for channels, global groups, and Windows hosts from JSON/YAML files into dedicated Elasticsearch indices.
-Allows dynamic retrieval and management of these configurations via API endpoints.
-Real-time Web Dashboard:
-A responsive Flask-based web interface for visualizing the health and status of all monitored devices.
-Displays overall status, active alarms, and detailed information for IRD, Windows, and iLO components.
-Includes a full-screen alarm console for focused alarm monitoring.
-Robust Logging and Error Handling:
-Comprehensive logging across all components for debugging and operational insights.
-Handles connection errors and provides informative warning/error messages.
-Data Flow
-The application follows a client-server architecture with Elasticsearch acting as the central data store.
+---
 
-##Configuration Loading:
+# VigilSiddhi_V1
 
-The ElasticManager (from elastic_client.py) is responsible for connecting to Elasticsearch and loading initial configurations from channel_ilo_config.json, global_ilo_config.json, and windows_config.yaml (implied by elastic_client.py and windows_monitor.py config loading) into respective Elasticsearch indices (channel_config, global_config, windows_config).
-ird_monitor.py also loads its configurations from the ird_config Elasticsearch index.
-Monitoring Data Collection:
+**VigilSiddhi** is an extensible, multi-agent, real-time monitoring and alarm management system for broadcast, network, and IT infrastructure. It supports modern architectures with SNMP, Windows, iLO, IRD, Switch, and custom health checks, providing unified dashboards, alarm consoles, and history analytics. The backend is powered by Python (Flask), Elasticsearch, MySQL, Redis Streams, WebSockets, and push notifications.
 
-IRD Monitoring: The D9800IRD class (from ird_monitor.py) periodically fetches status data, RF parameters, and channel names from configured Cisco D9800 IRD devices using HTTP/HTTPS requests. ird_graph.py provides functions for specific IRD data fetching (RF data, channel name) and pushing to ES.
-Windows Monitoring: The WindowsMonitor class (from windows_monitor.py) connects to Windows hosts via SSH to execute PowerShell commands, gathering service, process, disk, and network information.
-iLO Monitoring: The ILOProxy class (from ilo_proxy.py) interacts with HPE iLO devices to retrieve active IML alarms and compute collective group statuses.
-Data Processing and Storage:
+---
 
-Monitors (IRD, Windows) process the collected raw data.
-Alarms and status issues are generated based on predefined logic and thresholds.
-All collected monitoring data (trend data) and generated alarms are pushed to Elasticsearch into ird_trend, windows_trend, active_alarms, and historical_alarms indices.
-API Exposure (Backend):
+## Table of Contents
 
-The main.py Flask application acts as the backend server.
-It initializes instances of ElasticManager, ILOProxy, D9800IRD, and WindowsMonitor.
-It exposes RESTful API endpoints that the frontend can query to retrieve real-time status data, alarms, and configuration information.
-Frontend Visualization (Dashboard):
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [How It Works](#how-it-works)
+- [Architecture](#architecture)
+- [NMS, IT, and OT Environments](#nms-it-and-ot-environments)
+- [Pros & Benefits](#pros--benefits)
+- [API Endpoints](#api-endpoints)
+- [Elasticsearch Indexes & Schema](#elasticsearch-indexes--schema)
+- [MySQL Tables & Roles](#mysql-tables--roles)
+- [Redis Streams & Groups](#redis-streams--groups)
+- [Real-Time & Notifications](#real-time--notifications)
+- [Future Improvements](#future-improvements)
+- [Contributing](#contributing)
+- [License](#license)
 
-The index.html and alarm_console_fullscreen.html files represent the web frontend.
-These HTML pages use JavaScript to make asynchronous calls to the Flask API endpoints.
-The retrieved data is then rendered dynamically on the dashboard, providing an overview of system health and detailed alarm information.
-Endpoints
-The Flask application exposes the following API endpoints:
+---
 
-##Dashboard & HTML Endpoints:
+## Overview
 
-/ (GET): Serves the main dashboard HTML page (index.html).
-/alarm_console_fullscreen (GET): Serves the full-screen alarm console HTML page (alarm_console_fullscreen.html).
-Monitoring Status Endpoints:
+VigilSiddhi is designed for 24x7 operational monitoring of devices such as IRDs, switches, servers (Windows/Linux), HP iLOs, and networked appliances. It provides:
 
-/api/v1/get_windows_status (GET): Fetches the overall status and details for all configured Windows hosts.
-/api/v1/get_ilo_collective_status (GET): Fetches the collective status and alarms for configured iLO device groups.
-/api/v1/get_ird_status (GET): Fetches the overall status and alarms for all configured Cisco D9800 IRD devices.
-/api/v1/get_active_alarms_dashboard (GET): Fetches active alarms relevant for display on the dashboard.
-Configuration Management Endpoints:
+- Real-time health dashboards
+- Configurable alarm rules and deduplication
+- Alarm history and forensic analytics
+- Seamless integration with NMS, IT, and OT environments
 
-/api/v1/configs/all (GET): Retrieves all configurations (channel, global, windows).
-/api/v1/configs/channel (GET): Retrieves all channel configurations.
-/api/v1/configs/global (GET): Retrieves all global group configurations.
-/api/v1/configs/windows (GET): Retrieves all Windows host configurations.
-/api/v1/configs/channel/<int:channel_id> (GET): Retrieves a specific channel configuration by channel_id.
-/api/v1/configs/global/<string:group_id> (GET): Retrieves a specific global group configuration by group_id.
-/api/v1/configs/windows/<string:host_name> (GET): Retrieves a specific Windows host configuration by host_name.
-/api/v1/configs/channel (POST): Adds or updates a channel configuration.
-/api/v1/configs/global (POST): Adds or updates a global group configuration.
-/api/v1/configs/windows (POST): Adds or updates a Windows host configuration.
-/api/v1/configs/channel/<int:channel_id> (DELETE): Deletes a channel configuration by channel_id.
-/api/v1/configs/global/<string:group_id> (DELETE): Deletes a global group configuration by group_id.
-/api/v1/configs/windows/<string:host_name> (DELETE): Deletes a Windows host configuration by host_name.
-Elasticsearch Index Formats
-This section details the mappings for the Elasticsearch indices used by the application. The base Elasticsearch URL used in the examples is http://192.168.56.30:9200.
+---
 
-##ird_trend Index
-Purpose: Stores time-series trend data for Cisco D9800 IRD devices.
-Mapping:
-```
-{
-  "mappings": {
-    "properties": {
-      "@timestamp": { "type": "date" },
-      "system_id": { "type": "integer" },
-      "channel_name": { "type": "text" },
-      "cn_margin": { "type": "float" },
-      "signal_level": { "type": "float" },
-      "input_rate": { "type": "long" }
-    }
-  }
-}
-```
-channel_config Index
-Purpose: Stores configurations for various channels, each potentially containing multiple devices.
-Mapping:
-JSON
-```
-{
-  "mappings": {
-    "properties": {
-      "channel_id": { "type": "integer" },
-      "devices": {
-        "type": "nested",
-        "properties": {
-          "id": { "type": "keyword" },
-          "ip": { "type": "ip" },
-          "username": { "type": "keyword" },
-          "password": { "type": "keyword" }
-        }
-      }
-    }
-  }
-}
+## Key Features
+
+- **Multi-Agent Monitoring:** SNMP polling, SNMP traps, Windows/Linux process checks, website/API health, iLO monitoring, IRD, switch monitoring, and more.
+- **Real-Time Alarm Console:** Operator-friendly alarm board with live updates.
+- **WebSocket Live Updates:** Instant push of alarm/status to dashboards via WebSocket.
+- **Event-Based Notifications:** Telegram and Email alerts for each event (raise/clear).
+- **Flexible Data Storage:** Elasticsearch for state/config/history, MySQL for structured config, Redis Streams for event flow.
+- **Config-Driven:** Add/change monitored devices/channels via JSON/YAML or DB.
+- **Historical Analytics:** Search, filter, and export alarm/event history.
+- **REST API:** Integration with external systems and custom dashboards.
+- **Extensible:** Add new agent types/protocols with minimal code changes.
+
+---
+
+## How It Works
+
+1. **Configuration:**  
+   Device/channel/global block configs are loaded from JSON/YAML and stored in MySQL and Elasticsearch.
+2. **Agent Operation:**  
+   Multiple agents (pollers, trap receivers, Windows, IRD, etc.) run in parallel, collecting health/status data.
+3. **Event Processing:**  
+   Agents push events to Redis Streams, which are consumed by processor groups for deduplication, state updates, and delivery to Elasticsearch/MySQL.
+4. **Frontend/UI:**  
+   Flask serves dashboards, alarm consoles, and REST APIs.
+5. **Live Updates & Alerts:**  
+   - Consumers notify WebSocket broadcaster and send Telegram/Email notifications per event.
+6. **Operator Actions:**  
+   Operators use the dashboard/alarm console for real-time, actionable visibility.
+
+---
+
+## Architecture
+
+```plaintext
++-------------------+      +---------------------+       +----------------------+
+|   Poller Agents   |----->| Redis Streams       |-----> |    Event Processor   |
+| SNMP, iLO, IRD,   |      | (agent-specific,    |      | (Dedup, State,       |
+| Switch, Windows   |      | grouped, persistent)|      |  Alarm Logic,        |
++-------------------+      +---------------------+      |  WebSocket/Notif.)   |
+         |                           |                      |   |        |
+         v                           |                      v   v        v
++-------------------+        +---------------------+   +---------------------+
+|  MySQL (Config)   |        | Elasticsearch      |   | WebSocket Notifier,  |
++-------------------+        | (State, History)   |   | Telegram, Email     |
+                             |                    |   +---------------------+
+                             +--------------------+
 ```
 
-global_config Index
-Purpose: Stores global group configurations, possibly for grouping different types of devices or services.
-Mapping:
-JSON
-```
-{
-  "mappings": {
-    "properties": {
-      "id": { "type": "keyword" },
-      "name": { "type": "text" },
-      "type": { "type": "keyword" },
-      "additional_ips": {
-        "type": "nested",
-        "properties": {
-          "ip": { "type": "ip" },
-          "username": { "type": "keyword" },
-          "password": { "type": "keyword" }
-        }
-      }
-    }
-  }
-}
-```
-##windows_config Index
-Purpose: Stores configurations for Windows hosts, including their IP addresses, credentials, and lists of services/processes to monitor.
-Mapping:
-JSON
-```
-{
-  "mappings": {
-    "properties": {
-      "name": { "type": "keyword" },
-      "ip": { "type": "ip" },
-      "username": { "type": "keyword" },
-      "password": { "type": "keyword" },
-      "services": { "type": "keyword" },
-      "processes": { "type": "keyword" }
-    }
-  }
-}
-```
-ird_config Index
-Purpose: Stores configurations specific to IRD devices, used by ird_monitor.py to fetch devices to monitor.
-Mapping:
-JSON
-```
-{
-  "mappings": {
-    "properties": {
-      "system_id": { "type": "keyword" },
-      "ip_address": { "type": "ip" },
-      "username": { "type": "keyword" },
-      "password": { "type": "keyword" },
-      "channel_name": { "type": "text" }
-    }
-  }
-}
-```
-##active_alarms Index
-Purpose: Stores currently active alarms for immediate display on the dashboard.
-Mapping:
-JSON
-```
-{
-  "mappings": {
-    "properties": {
-      "@timestamp": { "type": "date" },
-      "alarm_id": { "type": "keyword" },
-      "source": { "type": "keyword" },
-      "server_ip": { "type": "ip" },
-      "message": { "type": "text" },
-      "severity": { "type": "keyword" },
-      "channel_name": { "type": "keyword" },
-      "device_name": { "type": "keyword" },
-      "group_id": { "type": "keyword" }
-    }
-  }
-}
-```
-historical_alarms Index
-Purpose: Stores a complete history of all generated alarms.
-Mapping:
-JSON
-```
-{
-  "mappings": {
-    "properties": {
-      "@timestamp": { "type": "date" },
-      "alarm_id": { "type": "keyword" },
-      "source": { "type": "keyword" },
-      "server_ip": { "type": "ip" },
-      "message": { "type": "text" },
-      "severity": { "type": "keyword" },
-      "channel_name": { "type": "keyword" },
-      "device_name": { "type": "keyword" },
-      "group_id": { "type": "keyword" }
-    }
-  }
-}
-```
-Create Index with cURL
-You can create the necessary Elasticsearch indices using the following curl commands. Replace http://192.168.56.30:9200 with your Elasticsearch host and port if different.
+---
 
-Bash
-```
-curl -X PUT "http://192.168.56.30:9200/ird_trend" -H "Content-Type: application/json" -d "{\"mappings\":{\"properties\":{\"@timestamp\":{\"type\":\"date\"},\"system_id\":{\"type\":\"integer\"},\"channel_name\":{\"type\":\"text\"},\"cn_margin\":{\"type\":\"float\"},\"signal_level\":{\"type\":\"float\"},\"input_rate\":{\"type\":\"long\"}}}}"
-```
-```
-curl -X PUT "http://192.168.56.30:9200/channel_config" -H "Content-Type: application/json" -d "{\"mappings\":{\"properties\":{\"channel_id\":{\"type\":\"integer\"},\"devices\":{\"type\":\"nested\",\"properties\":{\"id\":{\"type\":\"keyword\"},\"ip\":{\"type\":\"ip\"},\"username\":{\"type\":\"keyword\"},\"password\":{\"type\":\"keyword\"}}}}}}"
-```
-```
-curl -X PUT "http://192.168.56.30:9200/global_config" -H "Content-Type: application/json" -d "{\"mappings\":{\"properties\":{\"id\":{\"type\":\"keyword\"},\"name\":{\"type\":\"text\"},\"type\":{\"type\":\"keyword\"},\"additional_ips\":{\"type\":\"nested\",\"properties\":{\"ip\":{\"type\":\"ip\"},\"username\":{\"type\":\"keyword\"},\"password\":{\"type\":\"keyword\"}}}}}}"
-```
-```
-curl -X PUT "http://192.168.56.30:9200/windows_config" -H "Content-Type: application/json" -d "{\"mappings\":{\"properties\":{\"name\":{\"type\":\"keyword\"},\"ip\":{\"type\":\"ip\"},\"username\":{\"type\":\"keyword\"},\"password\":{\"type\":\"keyword\"},\"services\":{\"type\":\"keyword\"},\"processes\":{\"type\":\"keyword\"}}}}"
-```
-```
-curl -X PUT "http://192.168.56.30:9200/ird_config" -H "Content-Type: application/json" -d "{\"mappings\":{\"properties\":{\"system_id\":{\"type\":\"keyword\"},\"ip_address\":{\"type\":\"ip\"},\"username\":{\"type\":\"keyword\"},\"password\":{\"type\":\"keyword\"},\"channel_name\":{\"type\":\"text\"}}}}"
-```
-```
-curl -X PUT "http://192.168.56.30:9200/active_alarms" -H "Content-Type: application/json" -d "{\"mappings\":{\"properties\":{\"@timestamp\":{\"type\":\"date\"},\"alarm_id\":{\"type\":\"keyword\"},\"source\":{\"type\":\"keyword\"},\"server_ip\":{\"type\":\"ip\"},\"message\":{\"type\":\"text\"},\"severity\":{\"type\":\"keyword\"},\"channel_name\":{\"type\":\"keyword\"},\"device_name\":{\"type\":\"keyword\"},\"group_id\":{\"type\":\"keyword\"}}}}"
-```
-```
-curl -X PUT "http://192.168.56.30:9200/historical_alarms" -H "Content-Type: application/json" -d "{\"mappings\":{\"properties\":{\"@timestamp\":{\"type\":\"date\"},\"alarm_id\":{\"type\":\"keyword\"},\"source\":{\"type\":\"keyword\"},\"server_ip\":{\"type\":\"ip\"},\"message\":{\"type\":\"text\"},\"severity\":{\"type\":\"keyword\"},\"channel_name\":{\"type\":\"keyword\"},\"device_name\":{\"type\":\"keyword\"},\"group_id\":{\"type\":\"keyword\"}}}}"
-```
-Get Index Schema
-To retrieve the mapping (schema) for a specific index, use the following curl command.
+## NMS, IT, and OT Environments
 
-Bash
-```curl -X GET "http://192.168.56.30:9200/historical_alarms?pretty"```
-Get Index Document
-To retrieve documents from an index (e.g., to see active alarms), use the following curl command. This will fetch the top 10 documents by default.
+- **NMS (Network Management System):**  
+  A platform for monitoring, managing, and controlling network devices (switches, routers, servers, etc.). NMS helps with fault management, performance monitoring, and configuration.
+- **IT (Information Technology):**  
+  All traditional computing, networking, and storage systems—servers, desktops, network equipment, and associated software.
+- **OT (Operational Technology):**  
+  Systems and equipment that monitor or control physical devices, processes, and events in industries (e.g., broadcast, manufacturing, utilities). Includes industrial control systems, SCADA, PLCs, and other real-world device management.
 
-Bash
-```curl -X GET "http://192.168.56.30:9200/active_alarms/_search?pretty"```
+**VigilSiddhi** unifies monitoring and alarm management across all these environments.
+
+---
+
+## Pros & Benefits
+
+- **Unified Monitoring:** All device types, protocols, and alarms in a single UI.
+- **High Reliability:** Agent/process decoupling via Redis Streams.
+- **Real-Time Operations:** Sub-second alarm updates with WebSockets.
+- **Scalable & Extensible:** Add new devices/protocols/features easily.
+- **Audit-Ready:** Full alarm/event history in Elasticsearch.
+- **Customizable:** Configurable mapping and notification rules.
+- **Proactive Response:** Telegram and email alerts for critical events.
+
+---
+
+## API Endpoints
+
+### HTML/UI Pages
+
+| Endpoint                         | Method | Description                         |
+|-----------------------------------|--------|-------------------------------------|
+| `/`                              | GET    | Main dashboard                      |
+| `/alarm_console_fullscreen`       | GET    | Full-screen alarm console           |
+| `/ird_overview`                  | GET    | IRD device overview                 |
+| `/switch_overview`               | GET    | Switch overview                     |
+
+### REST APIs
+
+| Endpoint                                   | Method | Data Served |
+|---------------------------------------------|--------|-------------|
+| `/api/v1/get_all_device_ips`                | GET    | List of all device IPs (MySQL) |
+| `/api/v1/get_channel_configs`               | GET    | Channel configs (MySQL)        |
+| `/api/v1/get_pgm_routing_configurations`    | GET    | PGM routing configs (MySQL)    |
+| `/api/v1/get_kmx_block_status`              | GET    | KMX block overall status (ES)  |
+| `/api/v1/get_all_active_alarms`             | GET    | All active alarms (ES)         |
+| `/api/v1/get_alarm_history`                 | GET/POST | Filtered alarm/event history (ES) |
+| `/api/v1/get_switch_overview_data`          | GET    | Switch config (MySQL) + stats (ES) |
+
+### WebSocket
+
+| Endpoint              | Description                          |
+|-----------------------|--------------------------------------|
+| `/ws/alarms` (example)| Real-time alarm/status updates for dashboards and alarm console |
+
+---
+
+## Elasticsearch Indexes & Schema
+
+### 1. `monitor_historical_alarms`
+**Purpose:** Complete alarm/event history  
+**Schema:**
+- `alarm_id` (keyword)
+- `timestamp` (date)
+- `message` (text)
+- `device_name` (keyword)
+- `block_id` (keyword)
+- `severity` (keyword)
+- `type` (keyword)
+- `device_ip` (ip)
+- `group_name` (keyword)
+
+### 2. `ird_trend_data`
+**Purpose:** IRD trend/statistics  
+**Schema:**  
+- `channel_name` (keyword)
+- `system_id` (integer)
+- `C_N_margin` (float)
+- `signal_strength` (float)
+- `timestamp` (date)
+- `ip_address` (ip)
+
+### 3. `ird_configurations`
+**Purpose:** IRD configuration and health  
+**Schema:**  
+- `ird_ip` (keyword)
+- `channel_name` (keyword)
+- `system_id` (integer)
+- `freq` (float)
+- `SR` (float)
+- `Pol` (keyword)
+- `C_N` (float)
+- `signal_strength` (float)
+- `moip_status` (keyword)
+- `output_bitrate` (float)
+- `input_bitrate` (float)
+- `last_updated` (date)
+
+### 4. `switch_overview`
+**Purpose:** Switch + interface health  
+**Schema:**  
+- `switch_ip` (keyword)
+- `hostname` (keyword)
+- `interfaces` (nested: name, alias, admin_status, oper_status, vlan, input/output_octets)
+- `timestamp` (date)
+
+---
+
+## MySQL Tables & Roles
+
+- `device_ips`: All registered device IPs
+- `channel_configs`: Channel mapping, block/channel naming, etc.
+- `pgm_routing_configs`: PGM router configuration
+- `switch_configs`: Switch IP, hostname, model, etc.
+
+**Roles:**  
+- Source of truth for device/channel metadata.
+- Used for API dropdowns, config reloads, and agent assignment.
+
+---
+
+## Redis Streams & Groups
+
+### Stream Names
+
+A selection of agent-specific streams (see `REDIS_STREAM_config.md` and code):
+
+- `vs:agent:cisco_sw_status`
+- `vs:agent:enc_ilo_status`, `vs:agent:enc_iloM_status`, `vs:agent:enc_iloP_status`, `vs:agent:enc_iloB_status`
+- `vs:agent:iloM_status`, `vs:agent:iloP_status`, `vs:agent:iloB_status`
+- `vs:agent:playoutmv_status`
+- `vs:agent:windows_status`
+- `vs:agent:ird_config_status`, `vs:agent:ird_trend_status`
+- `vs:agent:zixi_status`
+- `vs:agent:nexus_sw_status`
+- `vs:agent:gv_da_status`
+- `vs:agent:pgm_router_status`
+- `vs:agent:kmx_status`
+
+#### Consumer Groups
+
+- `<agent_stream>:group:<role>` (e.g., `vs:agent:kmx_status:group:kmx_processor`)
+- `websocket_broadcaster` and `es_ingester` for notifying frontends and persisting to ES
+
+#### Example
+
+```python
+# Example publishing to a Redis stream
+r.xadd("vs:agent:kmx_status", {"data": json.dumps(payload).encode('utf-8')})
+
+# Example consumer for ES and WebSocket
+r.xgroup_create("vs:agent:kmx_status", "es_ingester", id='$', mkstream=True)
+r.xgroup_create("vs:agent:kmx_status", "websocket_broadcaster", id='$', mkstream=True)
+```
+
+---
+
+## Real-Time & Notifications
+
+- **WebSocket:**  
+  All status and alarm updates are pushed to `/ws/alarms` endpoint for UIs.
+- **Telegram & Email:**  
+  Each event can trigger Telegram messages (to groups/users) and emails (to operators/teams).
+  Notification handlers are called on each event, with rules configurable per agent, block, or severity.
+
+---
+
+## Future Improvements
+
+- **Role-Based Access Control:**  
+  User authentication and role management.
+- **Agent Auto-Registration:**  
+  Dynamic agent/service onboarding.
+- **Containerization:**  
+  Docker/K8s deployment.
+- **Self-Healing & Auto-Remediation:**  
+  Automated actions on alarms.
+- **Integrations:**  
+  Additional notification channels (SMS, Slack, Teams), advanced rules.
+- **Mobile UI:**  
+  Responsive dashboard for mobile.
+- **Config Editor & Audit Logs:**  
+  In-app config management and operator audit trails.
+- **PWA Integration for Live Push Notifications:**  
+  Implement Progressive Web App (PWA) capabilities so users can install the dashboard on any device and receive real-time push notifications even when the app is closed. This includes:
+  - Service Workers for background sync and push
+  - Integration with browser/device notification APIs
+  - Installation prompt for mobile/desktop
+  - Offline support and improved mobile UX
+
+---
+
+## Contributing
+
+1. Fork this repo and create your feature branch (`git checkout -b feature/new-agent`).
+2. Commit your changes with clear messages.
+3. Push to the branch and open a pull request.
+
+---
+
+## License
+
+MIT License. See `LICENSE` file for details.
+
+---
+
+## Contact
+
+For queries, enhancements, or support, please open an issue or contact the maintainer: [pdek1991](https://github.com/pdek1991)
+
+---
+
+**For more, see the full codebase:** [VigilSiddhi_V1 on GitHub](https://github.com/pdek1991/VigilSiddhi_V1)
+
+---
+
+Let me know if you want any further customization or if you want this in a downloadable format!
